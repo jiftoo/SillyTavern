@@ -1,6 +1,7 @@
 const express = require('express');
 const fetch = require('node-fetch').default;
 const Readable = require('stream').Readable;
+const fs = require("fs");
 
 const { jsonParser } = require('../../express-common');
 const { CHAT_COMPLETION_SOURCES, GEMINI_SAFETY, BISON_SAFETY, OPENROUTER_HEADERS } = require('../../constants');
@@ -954,6 +955,8 @@ router.post('/generate', jsonParser, function (request, response) {
     };
 
     console.log(requestBody);
+	
+	fs.writeFileSync("latest-message-fetch.json", JSON.stringify(config, null, 4));
 
     makeRequest(config, response, request);
 
