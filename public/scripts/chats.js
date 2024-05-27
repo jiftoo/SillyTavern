@@ -463,6 +463,7 @@ export function encodeStyleTags(text) {
  */
 export function decodeStyleTags(text) {
     const styleDecodeRegex = /<custom-style>(.+?)<\/custom-style>/gms;
+    const mediaAllowed = isExternalMediaAllowed();
 
     return text.replaceAll(styleDecodeRegex, (_, style) => {
         try {
@@ -487,36 +488,19 @@ export function decodeStyleTags(text) {
                                         return v;
                                     }).join(' ');
 
-                    rule.selectors[i] = '.mes_text ' + selectors;
+                                    rule.selectors[i] = '.mes_text ' + selectors;
+                                }
+                            }
+                        }
+                        if (!mediaAllowed && Array.isArray(rule.declarations) && rule.declarations.length > 0) {
+                            for (const declaration of rule.declarations) {
+                                if (declaration.value.includes('://')) {
+                                    rule.declarations.splice(rule.declarations.indexOf(declaration), 1);
+                                }
+                            }
+                        }
+                    }
                 }
-            }
-        }
-        if (!mediaAllowed && Array.isArray(rule.declarations) && rule.declarations.length > 0) {
-            rule.declarations = rule.declarations.filter(declaration => !declaration.value.includes('://'));
-        }
-    }
-
-    function sanitizeRuleSet(ruleSet) {
-        if (Array.isArray(ruleSet.selectors) || Array.isArray(ruleSet.declarations)) {
-            sanitizeRule(ruleSet);
-        }
-
-        if (Array.isArray(ruleSet.rules)) {
-            ruleSet.rules = ruleSet.rules.filter(rule => rule.type !== 'import');
-
-            for (const mediaRule of ruleSet.rules) {
-                sanitizeRuleSet(mediaRule);
-            }
-        }
-    }
-
-    return text.replaceAll(styleDecodeRegex, (_, style) => {
-        try {
-            let styleCleaned = unescape(style).replaceAll(/<br\/>/g, '');
-            const ast = css.parse(styleCleaned);
-            const sheet = ast?.stylesheet;
-            if (sheet) {
-                sanitizeRuleSet(ast.stylesheet);
             }
             return `<style>${css.stringify(ast)}</style>`;
         } catch (error) {
