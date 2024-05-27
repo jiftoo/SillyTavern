@@ -1395,6 +1395,7 @@ jQuery(function () {
     });
 
     $(document).on('click', 'body.documentstyle .mes .mes_text', function () {
+        if (window.getSelection().toString()) return;
         if ($('.edit_textarea').length) return;
         $(this).closest('.mes').find('.mes_edit').trigger('click');
     });
