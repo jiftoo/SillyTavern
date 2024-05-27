@@ -463,19 +463,29 @@ export function encodeStyleTags(text) {
  */
 export function decodeStyleTags(text) {
     const styleDecodeRegex = /<custom-style>(.+?)<\/custom-style>/gms;
-    const mediaAllowed = isExternalMediaAllowed();
 
-    function sanitizeRule(rule) {
-        if (Array.isArray(rule.selectors)) {
-            for (let i = 0; i < rule.selectors.length; i++) {
-                const selector = rule.selectors[i];
-                if (selector) {
-                    const selectors = (selector.split(' ') ?? []).map((v) => {
-                        if (v.startsWith('.')) {
-                            return '.custom-' + v.substring(1);
-                        }
-                        return v;
-                    }).join(' ');
+    return text.replaceAll(styleDecodeRegex, (_, style) => {
+        try {
+            let styleCleaned = unescape(style).replaceAll(/<br\/>/g, '');
+            const ast = css.parse(styleCleaned);
+            const rules = ast?.stylesheet?.rules;
+            if (rules) {
+                for (const rule of rules) {
+                    if (rule.type === 'import') {
+                        rules.splice(rules.indexOf(rule), 1);
+                    }
+
+                    if (rule.type === 'rule') {
+                        if (rule.selectors) {
+                            for (let i = 0; i < rule.selectors.length; i++) {
+                                let selector = rule.selectors[i];
+                                if (selector) {
+                                    let selectors = (selector.split(' ') ?? []).map((v) => {
+                                        if (v.startsWith('.')) {
+                                            return '.custom-' + v.substring(1);
+                                        }
+                                        return v;
+                                    }).join(' ');
 
                     rule.selectors[i] = '.mes_text ' + selectors;
                 }
