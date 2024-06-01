@@ -8286,8 +8286,13 @@ export async function processDroppedFiles(files, preserveFileNames = false) {
         'text/x-yaml',
     ];
 
+    const allowedExtensions = [
+        'charx',
+    ];
+
     for (const file of files) {
-        if (allowedMimeTypes.includes(file.type)) {
+        const extension = file.name.split('.').pop().toLowerCase();
+        if (allowedMimeTypes.includes(file.type) || allowedExtensions.includes(extension)) {
             await importCharacter(file, preserveFileNames);
         } else {
             toastr.warning('Unsupported file type: ' + file.name);
@@ -8308,7 +8313,7 @@ async function importCharacter(file, preserveFileName = false) {
     }
 
     const ext = file.name.match(/\.(\w+)$/);
-    if (!ext || !(['json', 'png', 'yaml', 'yml'].includes(ext[1].toLowerCase()))) {
+    if (!ext || !(['json', 'png', 'yaml', 'yml', 'charx'].includes(ext[1].toLowerCase()))) {
         return;
     }
 
