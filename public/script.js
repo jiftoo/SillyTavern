@@ -10537,7 +10537,7 @@ jQuery(async function () {
         const html = await renderTemplateAsync('importCharacters');
 
         /** @type {string?} */
-        const input = await callGenericPopup(html, POPUP_TYPE.INPUT, '', { okButton: $('#shadow_popup_template').attr('popup_text_import'), rows: 4 });
+        const input = await callGenericPopup(html, POPUP_TYPE.INPUT, '', { wide: true, okButton: $('#shadow_popup_template').attr('popup_text_import'), rows: 4 });
 
         if (!input) {
             console.debug('Custom content import cancelled');
@@ -10548,7 +10548,7 @@ jQuery(async function () {
         const inputs = input.split('\n').map(x => x.trim()).filter(x => x.length > 0);
 
         for (const url of inputs) {
-            var request;
+            let request;
 
             if (isValidUrl(url)) {
                 console.debug('Custom content import started for URL: ', url);
