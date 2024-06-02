@@ -11,7 +11,7 @@ import { dragElement } from '../../RossAscends-mods.js';
 import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandNamedArgument } from '../../slash-commands/SlashCommandArgument.js';
-import { commonEnumProviders } from '../../slash-commands/SlashCommandCommonEnumsProvider.js';
+import { DragAndDropHandler } from '../../dragdrop.js';
 
 const extensionName = 'gallery';
 const extensionFolderPath = `scripts/extensions/${extensionName}/`;
@@ -57,7 +57,8 @@ async function getGalleryItems(url) {
  * @returns {Promise<void>} - Promise representing the completion of the gallery initialization.
  */
 async function initGallery(items, url) {
-    $('#dragGallery').nanogallery2({
+    const gallery = $('#dragGallery');
+    gallery.nanogallery2({
         'items': items,
         thumbnailWidth: 'auto',
         thumbnailHeight: thumbnailHeight,
@@ -81,44 +82,24 @@ async function initGallery(items, url) {
 
 
     eventSource.on('resizeUI', function (elmntName) {
-        jQuery('#dragGallery').nanogallery2('resize');
+        gallery.nanogallery2('resize');
     });
 
-    const dropZone = $('#dragGallery');
-    //remove any existing handlers
-    dropZone.off('dragover');
-    dropZone.off('dragleave');
-    dropZone.off('drop');
-
-    // Set dropzone height to be the same as the parent
-    dropZone.css('height', dropZone.parent().css('height'));
-
-    // Initialize dropzone handlers
-    dropZone.on('dragover', function (e) {
-        e.stopPropagation();  // Ensure this event doesn't propagate
-        e.preventDefault();
-        $(this).addClass('dragging');  // Add a CSS class to change appearance during drag-over
-    });
-
-    dropZone.on('dragleave', function (e) {
-        e.stopPropagation();  // Ensure this event doesn't propagate
-        $(this).removeClass('dragging');
-    });
-
-    dropZone.on('drop', function (e) {
-        e.stopPropagation();  // Ensure this event doesn't propagate
-        e.preventDefault();
-        $(this).removeClass('dragging');
-        let file = e.originalEvent.dataTransfer.files[0];
+    const dragDropHandler = new DragAndDropHandler('#dragGallery', async (files, event) => {
+        let file = files[0];
         uploadFile(file, url);  // Added url parameter to know where to upload
     });
+
+
+    // Set dropzone height to be the same as the parent
+    gallery.css('height', gallery.parent().css('height'));
 
     //let images populate first
     await delay(100);
     //unset the height (which must be getting set by the gallery library at some point)
-    $('#dragGallery').css('height', 'unset');
+    gallery.css('height', 'unset');
     //force a resize to make images display correctly
-    jQuery('#dragGallery').nanogallery2('resize');
+    gallery.nanogallery2('resize');
 }
 
 /**
@@ -420,10 +401,7 @@ function viewWithDragbox(items) {
 // Registers a simple command for opening the char gallery.
 SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'show-gallery',
     aliases: ['sg'],
-    callback: () => {
-        showCharGallery();
-        return '';
-    },
+    callback: showGalleryCommand,
     helpString: 'Shows the gallery.',
 }));
 SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'list-gallery',
@@ -431,21 +409,20 @@ SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'list-gallery
     callback: listGalleryCommand,
     returns: 'list of images',
     namedArgumentList: [
-        SlashCommandNamedArgument.fromProps({
-            name: 'char',
-            description: 'character name',
-            typeList: [ARGUMENT_TYPE.STRING],
-            enumProvider: commonEnumProviders.charName('character'),
-        }),
-        SlashCommandNamedArgument.fromProps({
-            name: 'group',
-            description: 'group name',
-            typeList: [ARGUMENT_TYPE.STRING],
-            enumProvider: commonEnumProviders.charName('group'),
-        }),
+        new SlashCommandNamedArgument(
+            'char', 'character name', [ARGUMENT_TYPE.STRING], false,
+        ),
+        new SlashCommandNamedArgument(
+            'group', 'group name', [ARGUMENT_TYPE.STRING], false,
+        ),
     ],
     helpString: 'List images in the gallery of the current char / group or a specified char / group.',
 }));
+
+
+function showGalleryCommand(args) {
+    showCharGallery();
+}
 
 async function listGalleryCommand(args) {
     try {
