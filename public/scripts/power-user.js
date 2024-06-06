@@ -2326,6 +2326,7 @@ async function saveTheme(name = undefined) {
         enableLabMode: power_user.enableLabMode,
         hotswap_enabled: power_user.hotswap_enabled,
         custom_css: power_user.custom_css,
+		custom_js: power_user.custom_js,
         bogus_folders: power_user.bogus_folders,
         zoomed_avatar_magnification: power_user.zoomed_avatar_magnification,
         reduced_motion: power_user.reduced_motion,
