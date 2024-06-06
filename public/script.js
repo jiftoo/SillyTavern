@@ -1852,6 +1852,13 @@ export function messageFormatting(mes, ch_name, isSystem, isUser, messageId) {
             });
         }
 
+		const scriptContents = [];
+		mes = mes.replace(/<script>.*<\/script>/gs, (match) => {
+			const id = Math.random().toString();
+			scriptContents.push([id, match]);
+			return id;
+		});
+
         mes = mes.replace(/```[\s\S]*?```|``[\s\S]*?``|`[\s\S]*?`|(".+?")|(\u201C.+?\u201D)/gm, function (match, p1, p2) {
             if (p1) {
                 return '<q>"' + p1.replace(/"/g, '') + '"</q>';
@@ -1866,6 +1873,10 @@ export function messageFormatting(mes, ch_name, isSystem, isUser, messageId) {
         if (!power_user.encode_tags) {
             mes = mes.replace(/\ufffe/g, '"');
         }
+
+		for(const [id, script] of scriptContents) {
+			mes = mes.replace(id, script);
+		}
 
         mes = mes.replaceAll('\\begin{align*}', '$$');
         mes = mes.replaceAll('\\end{align*}', '$$');
