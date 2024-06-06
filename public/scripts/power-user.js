@@ -1162,7 +1162,8 @@ async function applyCustomJS() {
     //     document.head.appendChild(style);
     // }
     // style.innerHTML = power_user.custom_js;
-	eval(power_user.custom_js);
+	// eval(power_user.custom_js);
+	$.globalEval(power_user.custom_js);
 }
 
 async function applyBlurStrength() {
