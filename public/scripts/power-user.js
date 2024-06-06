@@ -158,6 +158,8 @@ let power_user = {
 
     custom_css: '',
 
+	disableSanitize: false,
+
     waifuMode: false,
     movingUI: false,
     movingUIState: {},
@@ -309,6 +311,8 @@ const storage_keys = {
     border_color: 'TavernAI_border_color',
 
     custom_css: 'TavernAI_custom_css',
+
+	disableSanitize: 'disableSanitize',
 
     waifuMode: 'TavernAI_waifuMode',
     movingUI: 'TavernAI_movingUI',
@@ -1237,6 +1241,12 @@ async function applyTheme(name) {
                 switchWaifuMode();
             },
         },
+		{
+            key: 'disableSanitize',
+            action: async () => {
+                localStorage.setItem(storage_keys.disableSanitize, power_user.disableSanitize);
+            },
+        },
         {
             key: 'chat_display',
             action: async () => {
@@ -1588,6 +1598,7 @@ function loadPowerUserSettings(settings, data) {
     $('#markdown_escape_strings').val(power_user.markdown_escape_strings);
     $('#fast_ui_mode').prop('checked', power_user.fast_ui_mode);
     $('#waifuMode').prop('checked', power_user.waifuMode);
+    $('#disableSanitize').prop('checked', power_user.disableSanitize);
     $('#movingUImode').prop('checked', power_user.movingUI);
     $('#noShadowsmode').prop('checked', power_user.noShadows);
     $('#start_reply_with').val(power_user.user_prompt_bias);
@@ -3119,6 +3130,11 @@ $(document).ready(() => {
     $('#waifuMode').on('change', () => {
         power_user.waifuMode = $('#waifuMode').prop('checked');
         switchWaifuMode();
+        saveSettingsDebounced();
+    });
+
+	$('#disableSanitize').on('change', () => {
+        power_user.disableSanitize = $('#disableSanitize').prop('checked');
         saveSettingsDebounced();
     });
 

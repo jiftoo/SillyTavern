@@ -1897,7 +1897,11 @@ export function messageFormatting(mes, ch_name, isSystem, isUser, messageId) {
     /** @type {any} */
     const config = { MESSAGE_SANITIZE: true, ADD_TAGS: ['custom-style'] };
     mes = encodeStyleTags(mes);
-    mes = DOMPurify.sanitize(mes, config);
+	if (!power_user.disableSanitize){
+		mes = DOMPurify.sanitize(mes, config);
+	} else {
+		console.log("no sanitize");
+	}
     mes = decodeStyleTags(mes);
 
     return mes;

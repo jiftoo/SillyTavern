@@ -15,6 +15,7 @@
     "font_scale": 1,
     "fast_ui_mode": false,
     "waifuMode": false,
+	"disableSanitize": false,
     "avatar_style": 0,
     "chat_display": 1,
     "noShadows": false,
