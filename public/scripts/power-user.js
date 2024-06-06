@@ -157,6 +157,7 @@ let power_user = {
     border_color: `${getComputedStyle(document.documentElement).getPropertyValue('--SmartThemeBorderColor').trim()}`,
 
     custom_css: '',
+	custom_js: '',
 
 	disableSanitize: false,
 
@@ -311,6 +312,7 @@ const storage_keys = {
     border_color: 'TavernAI_border_color',
 
     custom_css: 'TavernAI_custom_css',
+    custom_js: 'customJs',
 
 	disableSanitize: 'disableSanitize',
 
@@ -1147,6 +1149,22 @@ async function applyCustomCSS() {
     style.innerHTML = power_user.custom_css;
 }
 
+async function applyCustomJS() {
+    power_user.custom_js = String(localStorage.getItem(storage_keys.custom_js) ?? '');
+
+    $('#customJS').val(power_user.custom_js);
+    // var styleId = 'custom-js';
+    // var style = document.getElementById(styleId);
+    // if (!style) {
+    //     style = document.createElement('script');
+    //     style.setAttribute('type', 'application/javascript');
+    //     style.setAttribute('id', styleId);
+    //     document.head.appendChild(style);
+    // }
+    // style.innerHTML = power_user.custom_js;
+	eval(power_user.custom_js);
+}
+
 async function applyBlurStrength() {
     power_user.blur_strength = Number(localStorage.getItem(storage_keys.blur_strength) ?? 1);
     document.documentElement.style.setProperty('--blurStrength', power_user.blur_strength);
@@ -1213,6 +1231,13 @@ async function applyTheme(name) {
                 await applyCustomCSS();
             },
         },
+		{
+            key: 'custom_js',
+			action: async () => {
+				localStorage.setItem(storage_keys.custom_js, power_user.custom_js);
+				await applyCustomJS();
+			},
+		},
         {
             key: 'shadow_width',
             action: async () => {
@@ -1437,6 +1462,7 @@ applyAvatarStyle();
 applyBlurStrength();
 applyShadowWidth();
 applyCustomCSS();
+applyCustomJS();
 switchMovingUI();
 noShadows();
 switchHotswap();
@@ -3144,6 +3170,13 @@ $(document).ready(() => {
         saveSettingsDebounced();
         applyCustomCSS();
     });
+
+	$('#customJS').on('change', () => {
+		power_user.custom_js = $('#customJS').val();
+		localStorage.setItem(storage_keys.custom_js, power_user.custom_js);
+		saveSettingsDebounced();
+		applyCustomJS();
+	});
 
     $('#movingUImode').change(function () {
         power_user.movingUI = $(this).prop('checked');
