@@ -1026,6 +1026,14 @@ export function isJsonSchemaSupported() {
     return [TABBY, LLAMACPP].includes(settings.type) && main_api === 'textgenerationwebui';
 }
 
+function getLogprobsNumber() {
+    if (settings.type === VLLM) {
+        return 5;
+    }
+
+    return 10;
+}
+
 export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, isContinue, cfgValues, type) {
     const canMultiSwipe = !isContinue && !isImpersonate && type !== 'quiet';
     const { banned_tokens, banned_strings } = getCustomTokenBans();
@@ -1035,7 +1043,7 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
         'model': getTextGenModel(),
         'max_new_tokens': maxTokens,
         'max_tokens': maxTokens,
-        'logprobs': power_user.request_token_probabilities ? 10 : undefined,
+        'logprobs': power_user.request_token_probabilities ? getLogprobsNumber() : undefined,
         'temperature': settings.dynatemp ? (settings.min_temp + settings.max_temp) / 2 : settings.temp,
         'top_p': settings.top_p,
         'typical_p': settings.typical_p,
