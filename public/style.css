@@ -1231,6 +1231,10 @@ select {
     z-index: 10000;
     pointer-events: none;
 
+    .autoComplete {
+        pointer-events: all;
+    }
+
 
     &.isFloating {
         --direction: row;
@@ -1247,7 +1251,6 @@ select {
         .autoComplete {
             flex: 0 0 auto;
             width: 50vw;
-            pointer-events: all;
         }
 
         &:after {
