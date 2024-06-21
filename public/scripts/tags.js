@@ -10,6 +10,8 @@ import {
     eventSource,
     event_types,
     DEFAULT_PRINT_TIMEOUT,
+    substituteParams,
+    printCharacters,
 } from '../script.js';
 // eslint-disable-next-line no-unused-vars
 import { FILTER_TYPES, FILTER_STATES, DEFAULT_FILTER_STATE, isFilterState, FilterHelper } from './filters.js';
@@ -24,6 +26,9 @@ import { isMobile } from './RossAscends-mods.js';
 import { POPUP_RESULT, POPUP_TYPE, callGenericPopup } from './popup.js';
 import { debounce_timeout } from './constants.js';
 import { INTERACTABLE_CONTROL_CLASS } from './keyboard.js';
+import { SlashCommandEnumValue } from './slash-commands/SlashCommandEnumValue.js';
+import { SlashCommandExecutor } from './slash-commands/SlashCommandExecutor.js';
+import { commonEnumProviders } from './slash-commands/SlashCommandCommonEnumsProvider.js';
 
 export {
     TAG_FOLDER_TYPES,
@@ -472,6 +477,27 @@ export function getTagKeyForEntityElement(element) {
 }
 
 /**
+ * Gets the key for char/group by searching based on the name or avatar. If none can be found, a toastr will be shown and null returned.
+ * This function is mostly used in slash commands.
+ *
+ * @param {string?} [charName] The optionally provided char name
+ * @param {object} [options] - Optional arguments
+ * @param {boolean} [options.suppressLogging=false] - Whether to suppress the toastr warning
+ * @returns {string?} - The char/group key, or null if none found
+ */
+export function searchCharByName(charName, { suppressLogging = false } = {}) {
+    const entity = charName
+        ? (characters.find(x => x.name === charName) || groups.find(x => x.name == charName))
+        : (selected_group ? groups.find(x => x.id == selected_group) : characters[this_chid]);
+    const key = getTagKeyForEntity(entity);
+    if (!key) {
+        if (!suppressLogging) toastr.warning(`Character ${charName} not found.`);
+        return null;
+    }
+    return key;
+}
+
+/**
  * Adds one or more tags to a given entity
  *
  * @param {Tag|Tag[]} tag - The tag or tags to add
@@ -662,7 +688,7 @@ const tagImportSettings = {
     ALWAYS_IMPORT_ALL: 1,
     ONLY_IMPORT_EXISTING: 2,
     IMPORT_NONE: 3,
-    ASK: 4
+    ASK: 4,
 };
 
 let globalTagImportSetting = tagImportSettings.ASK; // Default setting
@@ -734,7 +760,7 @@ async function showTagImportPopup(character, existingTags, newTags) {
         EXISTING: { result: 2, text: 'Import Existing' },
         ALL: { result: 3, text: 'Import All' },
         NONE: { result: 4, text: 'Import None' },
-    }
+    };
 
     const customButtonsCaptions = Object.values(importButtons).map(button => `&quot;${button.text}&quot;`);
     const customButtonsString = customButtonsCaptions.slice(0, -1).join(', ') + ' or ' + customButtonsCaptions.slice(-1);
@@ -842,7 +868,7 @@ function newTag(tagName) {
         name: tagName,
         folder_type: TAG_FOLDER_DEFAULT_TYPE,
         filter_state: DEFAULT_FILTER_STATE,
-        sort_order: tags.length,
+        sort_order: Math.max(0, ...tags.map(t => t.sort_order)) + 1,
         color: '',
         color2: '',
         create_date: Date.now(),
@@ -1204,13 +1230,27 @@ function onGroupCreateClick() {
 }
 
 export function applyTagsOnCharacterSelect(chid = null) {
-    //clearTagsFilter();
+    // If we are in create window, we cannot simply redraw, as there are no real persisted tags. Grab them, and pass them in
+    if (menu_type === 'create') {
+        const currentTagIds = $('#tagList').find('.tag').map((_, el) => $(el).attr('id')).get();
+        const currentTags = tags.filter(x => currentTagIds.includes(x.id));
+        printTagList($('#tagList'), { forEntityOrKey: null, tags: currentTags, tagOptions: { removable: true } });
+        return;
+    }
+
     chid = chid ?? Number(this_chid);
     printTagList($('#tagList'), { forEntityOrKey: chid, tagOptions: { removable: true } });
 }
 
 export function applyTagsOnGroupSelect(groupId = null) {
-    //clearTagsFilter();
+    // If we are in create window, we explicitly have to tell the system to print for the new group, not the one selected in the background
+    if (menu_type === 'group_create') {
+        const currentTagIds = $('#groupTagList').find('.tag').map((_, el) => $(el).attr('id')).get();
+        const currentTags = tags.filter(x => currentTagIds.includes(x.id));
+        printTagList($('#groupTagList'), { forEntityOrKey: null, tags: currentTags, tagOptions: { removable: true } });
+        return;
+    }
+
     groupId = groupId ?? Number(selected_group);
     printTagList($('#groupTagList'), { forEntityOrKey: groupId, tagOptions: { removable: true } });
 }
@@ -1745,22 +1785,6 @@ function printViewTagList(tagContainer, empty = true) {
 
 function registerTagsSlashCommands() {
     /**
-     * Gets the key for char/group for a slash command. If none can be found, a toastr will be shown and null returned.
-     * @param {string?} [charName] The optionally provided char name
-     * @returns {string?} - The char/group key, or null if none found
-     */
-    function paraGetCharKey(charName) {
-        const entity = charName
-            ? (characters.find(x => x.name === charName) || groups.find(x => x.name == charName))
-            : (selected_group ? groups.find(x => x.id == selected_group) : characters[this_chid]);
-        const key = getTagKeyForEntity(entity);
-        if (!key) {
-            toastr.warning(`Character ${charName} not found.`);
-            return null;
-        }
-        return key;
-    }
-    /**
      * Gets a tag by its name. Optionally can create the tag if it does not exist.
      * @param {string} tagName - The name of the tag
      * @param {object} options - Optional arguments
@@ -1788,18 +1812,29 @@ function registerTagsSlashCommands() {
         returns: 'true/false - Whether the tag was added or was assigned already',
         /** @param {{name: string}} namedArgs @param {string} tagName @returns {string} */
         callback: ({ name }, tagName) => {
-            const key = paraGetCharKey(name);
+            const key = searchCharByName(name);
             if (!key) return 'false';
             const tag = paraGetTag(tagName, { allowCreate: true });
             if (!tag) return 'false';
             const result = addTagsToEntity(tag, key);
+            printCharacters();
             return String(result);
         },
         namedArgumentList: [
-            new SlashCommandNamedArgument('name', 'Character name', [ARGUMENT_TYPE.STRING], false, false, '{{char}}'),
+            SlashCommandNamedArgument.fromProps({ name: 'name',
+                description: 'Character name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                defaultValue: '{{char}}',
+                enumProvider: commonEnumProviders.characters(),
+            }),
         ],
         unnamedArgumentList: [
-            new SlashCommandArgument('tag name', [ARGUMENT_TYPE.STRING], true),
+            SlashCommandArgument.fromProps({ description: 'tag name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: true,
+                enumProvider: commonEnumProviders.tagsForChar('not-existing'),
+                forceEnum: false,
+            }),
         ],
         helpString: `
         <div>
@@ -1822,18 +1857,29 @@ function registerTagsSlashCommands() {
         returns: 'true/false - Whether the tag was removed or wasn\'t assigned already',
         /** @param {{name: string}} namedArgs @param {string} tagName @returns {string} */
         callback: ({ name }, tagName) => {
-            const key = paraGetCharKey(name);
+            const key = searchCharByName(name);
             if (!key) return 'false';
             const tag = paraGetTag(tagName);
             if (!tag) return 'false';
             const result = removeTagFromEntity(tag, key);
+            printCharacters();
             return String(result);
         },
         namedArgumentList: [
-            new SlashCommandNamedArgument('name', 'Character name', [ARGUMENT_TYPE.STRING], false, false, '{{char}}'),
+            SlashCommandNamedArgument.fromProps({ name: 'name',
+                description: 'Character name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                defaultValue: '{{char}}',
+                enumProvider: commonEnumProviders.characters(),
+            }),
         ],
         unnamedArgumentList: [
-            new SlashCommandArgument('tag name', [ARGUMENT_TYPE.STRING], true),
+            SlashCommandArgument.fromProps({ description: 'tag name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: true,
+                /**@param {SlashCommandExecutor} executor */
+                enumProvider: commonEnumProviders.tagsForChar('existing'),
+            }),
         ],
         helpString: `
         <div>
@@ -1855,17 +1901,29 @@ function registerTagsSlashCommands() {
         returns: 'true/false - Whether the given tag name is assigned to the character',
         /** @param {{name: string}} namedArgs @param {string} tagName @returns {string} */
         callback: ({ name }, tagName) => {
-            const key = paraGetCharKey(name);
+            const key = searchCharByName(name);
             if (!key) return 'false';
             const tag = paraGetTag(tagName);
             if (!tag) return 'false';
             return String(tag_map[key].includes(tag.id));
         },
         namedArgumentList: [
-            new SlashCommandNamedArgument('name', 'Character name', [ARGUMENT_TYPE.STRING], false, false, '{{char}}'),
+            SlashCommandNamedArgument.fromProps({
+                name: 'name',
+                description: 'Character name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                defaultValue: '{{char}}',
+                enumProvider: commonEnumProviders.characters(),
+            }),
         ],
         unnamedArgumentList: [
-            new SlashCommandArgument('tag name', [ARGUMENT_TYPE.STRING], true),
+            SlashCommandArgument.fromProps({
+                description: 'tag name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: true,
+                /**@param {SlashCommandExecutor} executor */
+                enumProvider: commonEnumProviders.tagsForChar('all'),
+            }),
         ],
         helpString: `
         <div>
@@ -1887,13 +1945,19 @@ function registerTagsSlashCommands() {
         returns: 'Comma-separated list of all assigned tags',
         /** @param {{name: string}} namedArgs @returns {string} */
         callback: ({ name }) => {
-            const key = paraGetCharKey(name);
+            const key = searchCharByName(name);
             if (!key) return '';
             const tags = getTagsList(key);
             return tags.map(x => x.name).join(', ');
         },
         namedArgumentList: [
-            new SlashCommandNamedArgument('name', 'Character name', [ARGUMENT_TYPE.STRING], false, false, '{{char}}'),
+            SlashCommandNamedArgument.fromProps({
+                name: 'name',
+                description: 'Character name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                defaultValue: '{{char}}',
+                enumProvider: commonEnumProviders.characters(),
+            }),
         ],
         helpString: `
         <div>
