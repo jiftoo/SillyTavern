@@ -2,7 +2,6 @@ import {
     characters,
     saveSettingsDebounced,
     this_chid,
-    callPopup,
     menu_type,
     entitiesFilter,
     printCharactersDebounced,
@@ -10,8 +9,6 @@ import {
     eventSource,
     event_types,
     DEFAULT_PRINT_TIMEOUT,
-    substituteParams,
-    printCharacters,
 } from '../script.js';
 // eslint-disable-next-line no-unused-vars
 import { FILTER_TYPES, FILTER_STATES, DEFAULT_FILTER_STATE, isFilterState, FilterHelper } from './filters.js';
@@ -23,12 +20,12 @@ import { SlashCommandParser } from './slash-commands/SlashCommandParser.js';
 import { SlashCommand } from './slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from './slash-commands/SlashCommandArgument.js';
 import { isMobile } from './RossAscends-mods.js';
-import { POPUP_RESULT, POPUP_TYPE, callGenericPopup } from './popup.js';
+import { POPUP_RESULT, POPUP_TYPE, Popup, callGenericPopup } from './popup.js';
 import { debounce_timeout } from './constants.js';
 import { INTERACTABLE_CONTROL_CLASS } from './keyboard.js';
 import { SlashCommandEnumValue } from './slash-commands/SlashCommandEnumValue.js';
 import { SlashCommandExecutor } from './slash-commands/SlashCommandExecutor.js';
-import { commonEnumProviders } from './slash-commands/SlashCommandCommonEnumsProvider.js';
+import { renderTemplateAsync } from './templates.js';
 
 export {
     TAG_FOLDER_TYPES,
@@ -65,9 +62,18 @@ function getFilterHelper(listSelector) {
     return $(listSelector).is(GROUP_FILTER_SELECTOR) ? groupCandidatesFilter : entitiesFilter;
 }
 
-export const tag_filter_types = {
+/** @enum {number} */
+export const tag_filter_type = {
     character: 0,
     group_member: 1,
+};
+
+/** @enum {number} */
+export const tag_import_setting = {
+    ASK: 1,
+    NONE: 2,
+    ALL: 3,
+    ONLY_EXISTING: 4,
 };
 
 /**
@@ -245,16 +251,23 @@ function isBogusFolder(tag) {
 }
 
 /**
- * Indicates whether a user is currently in a bogus folder.
+ * Retrieves all currently open bogus folders
+ *
+ * @return {Tag[]} An array of open bogus folders
+ */
+function getOpenBogusFolders() {
+    return entitiesFilter.getFilterData(FILTER_TYPES.TAG)?.selected
+        .map(tagId => tags.find(x => x.id === tagId))
+        .filter(isBogusFolder) ?? [];
+}
+
+/**
+ * Indicates whether a user is currently in a bogus folder
  *
  * @returns {boolean} If currently viewing a folder
  */
 function isBogusFolderOpen() {
-    const anyIsFolder = entitiesFilter.getFilterData(FILTER_TYPES.TAG)?.selected
-        .map(tagId => tags.find(x => x.id === tagId))
-        .some(isBogusFolder);
-
-    return !!anyIsFolder;
+    return getOpenBogusFolders().length > 0;
 }
 
 /**
@@ -477,27 +490,6 @@ export function getTagKeyForEntityElement(element) {
 }
 
 /**
- * Gets the key for char/group by searching based on the name or avatar. If none can be found, a toastr will be shown and null returned.
- * This function is mostly used in slash commands.
- *
- * @param {string?} [charName] The optionally provided char name
- * @param {object} [options] - Optional arguments
- * @param {boolean} [options.suppressLogging=false] - Whether to suppress the toastr warning
- * @returns {string?} - The char/group key, or null if none found
- */
-export function searchCharByName(charName, { suppressLogging = false } = {}) {
-    const entity = charName
-        ? (characters.find(x => x.name === charName) || groups.find(x => x.name == charName))
-        : (selected_group ? groups.find(x => x.id == selected_group) : characters[this_chid]);
-    const key = getTagKeyForEntity(entity);
-    if (!key) {
-        if (!suppressLogging) toastr.warning(`Character ${charName} not found.`);
-        return null;
-    }
-    return key;
-}
-
-/**
  * Adds one or more tags to a given entity
  *
  * @param {Tag|Tag[]} tag - The tag or tags to add
@@ -684,15 +676,6 @@ function getExistingTags(newTags) {
     return existingTags;
 }
 
-const tagImportSettings = {
-    ALWAYS_IMPORT_ALL: 1,
-    ONLY_IMPORT_EXISTING: 2,
-    IMPORT_NONE: 3,
-    ASK: 4,
-};
-
-let globalTagImportSetting = tagImportSettings.ASK; // Default setting
-
 const IMPORT_EXLCUDED_TAGS = ['ROOT', 'TAVERN'];
 const ANTI_TROLL_MAX_TAGS = 15;
 
@@ -700,11 +683,13 @@ const ANTI_TROLL_MAX_TAGS = 15;
  * Imports tags for a given character
  *
  * @param {Character} character - The character
+ * @param {object} [options] - Options
+ * @param {boolean} [options.forceShow=false] - Whether to force showing the import dialog
  * @returns {Promise<boolean>} Boolean indicating whether any tag was imported
  */
-async function importTags(character) {
+async function importTags(character, { forceShow = false } = {}) {
     // Gather the tags to import based on the selected setting
-    const tagNamesToImport = await handleTagImport(character);
+    const tagNamesToImport = await handleTagImport(character, { forceShow });
     if (!tagNamesToImport?.length) {
         toastr.info('No tags imported', 'Importing Tags');
         return;
@@ -722,9 +707,11 @@ async function importTags(character) {
  * Handles the import of tags for a given character and returns the resulting list of tags to add
  *
  * @param {Character} character - The character
+ * @param {object} [options] - Options
+ * @param {boolean} [options.forceShow=false] - Whether to force showing the import dialog
  * @returns {Promise<string[]>} Array of strings representing the tags to import
  */
-async function handleTagImport(character) {
+async function handleTagImport(character, { forceShow = false } = {}) {
     /** @type {string[]} */
     const importTags = character.tags.map(t => t.trim()).filter(t => t)
         .filter(t => !IMPORT_EXLCUDED_TAGS.includes(t))
@@ -732,17 +719,22 @@ async function handleTagImport(character) {
     const existingTags = getExistingTags(importTags);
     const newTags = importTags.filter(t => !existingTags.some(existingTag => existingTag.name.toLowerCase() === t.toLowerCase()))
         .map(newTag);
+    const folderTags = getOpenBogusFolders();
 
-    switch (globalTagImportSetting) {
-        case tagImportSettings.ALWAYS_IMPORT_ALL:
-            return existingTags.concat(newTags).map(t => t.name);
-        case tagImportSettings.ONLY_IMPORT_EXISTING:
-            return existingTags.map(t => t.name);
-        case tagImportSettings.ASK:
-            return await showTagImportPopup(character, existingTags, newTags);
-        case tagImportSettings.IMPORT_NONE:
-        default:
+    // Choose the setting for this dialog. If from settings, verify the setting really exists, otherwise take "ASK".
+    const setting = forceShow ? tag_import_setting.ASK
+        : Object.values(tag_import_setting).find(setting => setting === power_user.tag_import_setting) ?? tag_import_setting.ASK;
+
+    switch (setting) {
+        case tag_import_setting.ALL:
+            return [...existingTags, ...newTags, ...folderTags].map(t => t.name);
+        case tag_import_setting.ONLY_EXISTING:
+            return [...existingTags, ...folderTags].map(t => t.name);
+        case tag_import_setting.ASK:
+            return await showTagImportPopup(character, existingTags, newTags, folderTags);
+        case tag_import_setting.NONE:
             return [];
+        default: throw new Error(`Invalid tag import setting: ${setting}`);
     }
 }
 
@@ -752,63 +744,54 @@ async function handleTagImport(character) {
  * @param {Character} character - The character
  * @param {Tag[]} existingTags - List of existing tags
  * @param {Tag[]} newTags - List of new tags
+ * @param {Tag[]} folderTags - List of tags in the current folder
  * @returns {Promise<string[]>} Array of strings representing the tags to import
  */
-async function showTagImportPopup(character, existingTags, newTags) {
+async function showTagImportPopup(character, existingTags, newTags, folderTags) {
     /** @type {{[key: string]: import('./popup.js').CustomPopupButton}} */
     const importButtons = {
-        EXISTING: { result: 2, text: 'Import Existing' },
+        NONE: { result: 2, text: 'Import None', },
         ALL: { result: 3, text: 'Import All' },
-        NONE: { result: 4, text: 'Import None' },
+        EXISTING: { result: 4, text: 'Import Existing' },
+    };
+    const buttonSettingsMap = {
+        [POPUP_RESULT.AFFIRMATIVE]: tag_import_setting.ASK,
+        [importButtons.NONE.result]: tag_import_setting.NONE,
+        [importButtons.ALL.result]: tag_import_setting.ALL,
+        [importButtons.EXISTING.result]: tag_import_setting.ONLY_EXISTING,
     };
 
-    const customButtonsCaptions = Object.values(importButtons).map(button => `&quot;${button.text}&quot;`);
-    const customButtonsString = customButtonsCaptions.slice(0, -1).join(', ') + ' or ' + customButtonsCaptions.slice(-1);
-
-    const popupContent = $(`
-        <h3>Import Tags For ${character.name}</h3>
-        <div class="import_avatar_placeholder"></div>
-        <div class="import_tags_content justifyLeft">
-            <small>
-                Click remove on any tag to remove it from this import.<br />
-                Select one of the import options to finish importing the tags.
-            </small>
-
-            <h4 class="m-t-1">Existing Tags</h4>
-            <div id="import_existing_tags_list" class="tags"></div>
-
-            <h4 class="m-t-1">New Tags</h4>
-            <div id="import_new_tags_list" class="tags"></div>
-
-            <small>
-                <label class="checkbox flex-container alignitemscenter flexNoGap m-t-3" for="import_remember_option">
-                    <input type="checkbox" id="import_remember_option" name="import_remember_option" />
-                    <span data-i18n="Remember my choice">
-                        Remember my choice
-                        <div class="fa-solid fa-circle-info opacity50p" data-i18n="[title]Remember the chosen import option\nIf ${customButtonsString} is selected, this dialog will not show up anymore.\nTo change this, go to the settings and modify &quot;Tag Import Option&quot;.\n\nIf the &quot;Import&quot; option is chosen, the global setting will stay on &quot;Ask&quot;."
-                            title="Remember the chosen import option\nIf ${customButtonsString} is selected, this dialog will not show up anymore.\nTo change this, go to the settings and modify &quot;Tag Import Option&quot;.\n\nIf the &quot;Import&quot; option is chosen, the global setting will stay on &quot;Ask&quot;.">
-                        </div>
-                    </span>
-                </label>
-            </small>
-        </div>`);
+    const popupContent = $(await renderTemplateAsync('charTagImport', { charName: character.name }));
 
     // Print tags after popup is shown, so that events can be added
     printTagList(popupContent.find('#import_existing_tags_list'), { tags: existingTags, tagOptions: { removable: true, removeAction: tag => removeFromArray(existingTags, tag) } });
     printTagList(popupContent.find('#import_new_tags_list'), { tags: newTags, tagOptions: { removable: true, removeAction: tag => removeFromArray(newTags, tag) } });
+    printTagList(popupContent.find('#import_folder_tags_list'), { tags: folderTags, tagOptions: { removable: true, removeAction: tag => removeFromArray(folderTags, tag) } });
 
-    const result = await callGenericPopup(popupContent, POPUP_TYPE.TEXT, null, { wider: true, okButton: 'Import', cancelButton: true, customButtons: Object.values(importButtons) });
+    if (folderTags.length === 0) popupContent.find('#folder_tags_block').hide();
+
+    function onCloseRemember(/** @type {Popup} */ popup) {
+        const rememberCheckbox = document.getElementById('import_remember_option');
+        if (rememberCheckbox instanceof HTMLInputElement && rememberCheckbox.checked) {
+            const setting = buttonSettingsMap[popup.result];
+            if (!setting) return;
+            power_user.tag_import_setting = setting;
+            saveSettingsDebounced();
+            console.log('Remembered tag import setting:', Object.entries(tag_import_setting).find(x => x[1] === setting)[0], setting);
+        }
+    }
+
+    const result = await callGenericPopup(popupContent, POPUP_TYPE.TEXT, null, { wider: true, okButton: 'Import', cancelButton: true, customButtons: Object.values(importButtons), onClose: onCloseRemember });
     if (!result) {
         return [];
     }
 
     switch (result) {
-        case 1:
-        case true:
-        case importButtons.ALL.result: // Default 'Import' option where it imports all selected
-            return existingTags.concat(newTags).map(t => t.name);
+        case POPUP_RESULT.AFFIRMATIVE: // Default 'Import' option where it imports all selected
+        case importButtons.ALL.result:
+            return [...existingTags, ...newTags, ...folderTags].map(t => t.name);
         case importButtons.EXISTING.result:
-            return existingTags.map(t => t.name);
+            return [...existingTags, ...folderTags].map(t => t.name);
         case importButtons.NONE.result:
         default:
             return [];
@@ -1137,8 +1120,8 @@ function runTagFilters(listElement) {
     filterHelper.setFilterData(FILTER_TYPES.TAG, { excluded: excludedTagIds, selected: tagIds });
 }
 
-function printTagFilters(type = tag_filter_types.character) {
-    const FILTER_SELECTOR = type === tag_filter_types.character ? CHARACTER_FILTER_SELECTOR : GROUP_FILTER_SELECTOR;
+function printTagFilters(type = tag_filter_type.character) {
+    const FILTER_SELECTOR = type === tag_filter_type.character ? CHARACTER_FILTER_SELECTOR : GROUP_FILTER_SELECTOR;
     $(FILTER_SELECTOR).empty();
 
     // Print all action tags. (Rework 'Folder' button to some kind of onboarding if no folders are enabled yet)
@@ -1157,9 +1140,7 @@ function printTagFilters(type = tag_filter_types.character) {
     const bogusDrilldown = $(FILTER_SELECTOR).siblings('.rm_tag_bogus_drilldown');
     bogusDrilldown.empty();
     if (power_user.bogus_folders && bogusDrilldown.length > 0) {
-        const filterData = structuredClone(entitiesFilter.getFilterData(FILTER_TYPES.TAG));
-        const navigatedTags = filterData.selected.map(x => tags.find(t => t.id == x)).filter(x => isBogusFolder(x));
-
+        const navigatedTags = getOpenBogusFolders();
         printTagList(bogusDrilldown, { tags: navigatedTags, tagOptions: { removable: true } });
     }
 
@@ -1785,6 +1766,22 @@ function printViewTagList(tagContainer, empty = true) {
 
 function registerTagsSlashCommands() {
     /**
+     * Gets the key for char/group for a slash command. If none can be found, a toastr will be shown and null returned.
+     * @param {string?} [charName] The optionally provided char name
+     * @returns {string?} - The char/group key, or null if none found
+     */
+    function paraGetCharKey(charName) {
+        const entity = charName
+            ? (characters.find(x => x.name === charName) || groups.find(x => x.name == charName))
+            : (selected_group ? groups.find(x => x.id == selected_group) : characters[this_chid]);
+        const key = getTagKeyForEntity(entity);
+        if (!key) {
+            toastr.warning(`Character ${charName} not found.`);
+            return null;
+        }
+        return key;
+    }
+    /**
      * Gets a tag by its name. Optionally can create the tag if it does not exist.
      * @param {string} tagName - The name of the tag
      * @param {object} options - Optional arguments
@@ -1812,12 +1809,11 @@ function registerTagsSlashCommands() {
         returns: 'true/false - Whether the tag was added or was assigned already',
         /** @param {{name: string}} namedArgs @param {string} tagName @returns {string} */
         callback: ({ name }, tagName) => {
-            const key = searchCharByName(name);
+            const key = paraGetCharKey(name);
             if (!key) return 'false';
             const tag = paraGetTag(tagName, { allowCreate: true });
             if (!tag) return 'false';
             const result = addTagsToEntity(tag, key);
-            printCharacters();
             return String(result);
         },
         namedArgumentList: [
@@ -1825,14 +1821,22 @@ function registerTagsSlashCommands() {
                 description: 'Character name',
                 typeList: [ARGUMENT_TYPE.STRING],
                 defaultValue: '{{char}}',
-                enumProvider: commonEnumProviders.characters(),
+                enumProvider: ()=>[
+                    ...characters.map(it=>new SlashCommandEnumValue(it.name, null, 'qr', 'C')),
+                    ...groups.map(it=>new SlashCommandEnumValue(it.name, null, 'variable', 'G')),
+                ],
             }),
         ],
         unnamedArgumentList: [
             SlashCommandArgument.fromProps({ description: 'tag name',
                 typeList: [ARGUMENT_TYPE.STRING],
                 isRequired: true,
-                enumProvider: commonEnumProviders.tagsForChar('not-existing'),
+                enumProvider: (executor)=>{
+                    const key = paraGetCharKey(/**@type {string}*/(executor.namedArgumentList.find(it=>it.name == 'name')?.value));
+                    if (!key) return tags.map(it=>new SlashCommandEnumValue(it.name, it.title));
+                    const assigned = getTagsList(key);
+                    return tags.filter(it=>!assigned.includes(it)).map(it=>new SlashCommandEnumValue(it.name, it.title));
+                },
                 forceEnum: false,
             }),
         ],
@@ -1857,12 +1861,11 @@ function registerTagsSlashCommands() {
         returns: 'true/false - Whether the tag was removed or wasn\'t assigned already',
         /** @param {{name: string}} namedArgs @param {string} tagName @returns {string} */
         callback: ({ name }, tagName) => {
-            const key = searchCharByName(name);
+            const key = paraGetCharKey(name);
             if (!key) return 'false';
             const tag = paraGetTag(tagName);
             if (!tag) return 'false';
             const result = removeTagFromEntity(tag, key);
-            printCharacters();
             return String(result);
         },
         namedArgumentList: [
@@ -1870,7 +1873,10 @@ function registerTagsSlashCommands() {
                 description: 'Character name',
                 typeList: [ARGUMENT_TYPE.STRING],
                 defaultValue: '{{char}}',
-                enumProvider: commonEnumProviders.characters(),
+                enumProvider: ()=>[
+                    ...characters.map(it=>new SlashCommandEnumValue(it.name, null, 'qr', 'C')),
+                    ...groups.map(it=>new SlashCommandEnumValue(it.name, null, 'variable', 'G')),
+                ],
             }),
         ],
         unnamedArgumentList: [
@@ -1878,7 +1884,11 @@ function registerTagsSlashCommands() {
                 typeList: [ARGUMENT_TYPE.STRING],
                 isRequired: true,
                 /**@param {SlashCommandExecutor} executor */
-                enumProvider: commonEnumProviders.tagsForChar('existing'),
+                enumProvider: (executor)=>{
+                    const key = paraGetCharKey(/**@type {string}*/(executor.namedArgumentList.find(it=>it.name == 'name')?.value));
+                    if (!key) return tags.map(it=>new SlashCommandEnumValue(it.name, it.title));
+                    return getTagsList(key).map(it=>new SlashCommandEnumValue(it.name, it.title));
+                },
             }),
         ],
         helpString: `
@@ -1901,29 +1911,17 @@ function registerTagsSlashCommands() {
         returns: 'true/false - Whether the given tag name is assigned to the character',
         /** @param {{name: string}} namedArgs @param {string} tagName @returns {string} */
         callback: ({ name }, tagName) => {
-            const key = searchCharByName(name);
+            const key = paraGetCharKey(name);
             if (!key) return 'false';
             const tag = paraGetTag(tagName);
             if (!tag) return 'false';
             return String(tag_map[key].includes(tag.id));
         },
         namedArgumentList: [
-            SlashCommandNamedArgument.fromProps({
-                name: 'name',
-                description: 'Character name',
-                typeList: [ARGUMENT_TYPE.STRING],
-                defaultValue: '{{char}}',
-                enumProvider: commonEnumProviders.characters(),
-            }),
+            new SlashCommandNamedArgument('name', 'Character name', [ARGUMENT_TYPE.STRING], false, false, '{{char}}'),
         ],
         unnamedArgumentList: [
-            SlashCommandArgument.fromProps({
-                description: 'tag name',
-                typeList: [ARGUMENT_TYPE.STRING],
-                isRequired: true,
-                /**@param {SlashCommandExecutor} executor */
-                enumProvider: commonEnumProviders.tagsForChar('all'),
-            }),
+            new SlashCommandArgument('tag name', [ARGUMENT_TYPE.STRING], true),
         ],
         helpString: `
         <div>
@@ -1945,19 +1943,13 @@ function registerTagsSlashCommands() {
         returns: 'Comma-separated list of all assigned tags',
         /** @param {{name: string}} namedArgs @returns {string} */
         callback: ({ name }) => {
-            const key = searchCharByName(name);
+            const key = paraGetCharKey(name);
             if (!key) return '';
             const tags = getTagsList(key);
             return tags.map(x => x.name).join(', ');
         },
         namedArgumentList: [
-            SlashCommandNamedArgument.fromProps({
-                name: 'name',
-                description: 'Character name',
-                typeList: [ARGUMENT_TYPE.STRING],
-                defaultValue: '{{char}}',
-                enumProvider: commonEnumProviders.characters(),
-            }),
+            new SlashCommandNamedArgument('name', 'Character name', [ARGUMENT_TYPE.STRING], false, false, '{{char}}'),
         ],
         helpString: `
         <div>
