@@ -1013,8 +1013,8 @@ function registerWorldInfoSlashCommands() {
             throw new Error('This command can only be used in chat');
         }
 
-        const file = resolveVariable(args.file);
-        const uid = resolveVariable(value);
+        const file = args.file;
+        const uid = value;
         const effect = args.effect;
 
         const entries = await getEntriesFromFile(file);
@@ -1051,8 +1051,8 @@ function registerWorldInfoSlashCommands() {
             throw new Error('This command can only be used in chat');
         }
 
-        const file = resolveVariable(args.file);
-        const uid = resolveVariable(args.uid);
+        const file = args.file;
+        const uid = args.uid;
         const effect = args.effect;
 
         if (value === undefined) {
