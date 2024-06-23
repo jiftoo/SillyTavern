@@ -586,12 +586,6 @@ class WorldInfoTimedEffects {
             return;
         }
 
-        const currentState = this.isEffectActive(type, entry);
-
-        if (currentState === newState) {
-            return;
-        }
-
         const key = this.#getEntryKey(entry);
         delete chat_metadata.timedWorldInfo[type][key];
 
@@ -1107,7 +1101,7 @@ function registerWorldInfoSlashCommands() {
         }
 
         const getNewEffectState = () => {
-            const currentState = timedEffects.isEffectActive(effect, entry);
+            const currentState = !!timedEffects.getEffectMetadata(effect, entry);
 
             if (['toggle', 't', ''].includes(value.trim().toLowerCase())) {
                 return !currentState;
@@ -1124,12 +1118,10 @@ function registerWorldInfoSlashCommands() {
             return currentState;
         };
 
-        timedEffects.checkTimedEffects();
         const newEffectState = getNewEffectState();
         timedEffects.setTimedEffect(effect, entry, newEffectState);
 
         await saveMetadata();
-        timedEffects.cleanUp();
         toastr.success(`Timed effect "${effect}" for entry ${entry.uid} is now ${newEffectState ? 'active' : 'inactive'}`);
 
         return '';
