@@ -1206,7 +1206,10 @@ $(document).ready(function () {
     eventSource.makeLast(event_types.USER_MESSAGE_RENDERED, onMessageEvent);
     SlashCommandParser.addCommandObject(SlashCommand.fromProps({
         name: 'speak',
-        callback: onNarrateText,
+        callback: async (args, value) => {
+            await onNarrateText(args, value);
+            return '';
+        },
         aliases: ['narrate', 'tts'],
         namedArgumentList: [
             SlashCommandNamedArgument.fromProps({
