@@ -364,6 +364,11 @@ class WorldInfoTimedEffects {
     #entries = [];
 
     /**
+     * Set of entries to ignore chat advancement requirement for.
+     */
+    #entryIgnoreAdvancement = [];
+
+    /**
      * Buffer for active timed effects.
      * @type {Record<TimedEffectType, WIScanEntry[]>}
      */
@@ -393,6 +398,7 @@ class WorldInfoTimedEffects {
             console.log(`Adding cooldown entry ${key} on ended sticky: start=${effect.start}, end=${effect.end}`);
             // Set the cooldown immediately for this evaluation
             this.#buffer['cooldown'].push(entry);
+            this.#entryIgnoreAdvancement.push(entry);
         },
 
         /**
@@ -478,6 +484,15 @@ class WorldInfoTimedEffects {
     }
 
     /**
+     * Gets if the entry should be ignored for chat advancement requirement.
+     * @param {WIScanEntry} entry WI entry
+     * @returns {boolean} True if the entry should be ignored
+     */
+    #isChatAdvancementIgnored(entry) {
+        return entry && this.#entryIgnoreAdvancement.some(x => this.#getEntryHash(x) === this.#getEntryHash(entry));
+    }
+
+    /**
      * Processes entries for a given type of timed effect.
      * @param {TimedEffectType} type Identifier for the type of timed effect
      * @param {WIScanEntry[]} buffer Buffer to store the entries
@@ -490,7 +505,7 @@ class WorldInfoTimedEffects {
             console.log(`Processing ${type} entry ${key}`, value);
             const entry = this.#entries.find(x => String(this.#getEntryHash(x)) === String(value.hash));
 
-            if (this.#chat.length <= Number(value.start)) {
+            if (this.#chat.length <= Number(value.start) && !this.#isChatAdvancementIgnored(entry)) {
                 console.log(`Removing ${type} entry ${key} from timedWorldInfo: chat not advanced`, value);
                 delete chat_metadata.timedWorldInfo[type][key];
                 continue;
@@ -632,6 +647,7 @@ class WorldInfoTimedEffects {
         for (const buffer of Object.values(this.#buffer)) {
             buffer.splice(0, buffer.length);
         }
+        this.#entryIgnoreAdvancement.splice(0, this.#entryIgnoreAdvancement.length);
     }
 }
 
