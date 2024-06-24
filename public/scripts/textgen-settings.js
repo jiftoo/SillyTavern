@@ -910,6 +910,7 @@ export function parseTextgenLogprobs(token, logprobs) {
         case VLLM:
         case APHRODITE:
         case MANCER:
+        case INFERMATICAI:
         case OOBA: {
             /** @type {Record<string, number>[]} */
             const topLogprobs = logprobs.top_logprobs;
@@ -1027,7 +1028,7 @@ export function isJsonSchemaSupported() {
 }
 
 function getLogprobsNumber() {
-    if (settings.type === VLLM) {
+    if (settings.type === VLLM || settings.type === INFERMATICAI) {
         return 5;
     }
 
@@ -1131,7 +1132,7 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
         'best_of': canMultiSwipe ? settings.n : 1,
         'ignore_eos': settings.ignore_eos_token,
         'spaces_between_special_tokens': settings.spaces_between_special_tokens,
-        'seed': settings.seed,
+        'seed': settings.seed >= 0 ? settings.seed : undefined,
     };
     const aphroditeParams = {
         'n': canMultiSwipe ? settings.n : 1,
@@ -1169,6 +1170,7 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
 
     switch (settings.type) {
         case VLLM:
+        case INFERMATICAI:
             params = Object.assign(params, vllmParams);
             break;
 
