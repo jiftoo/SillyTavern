@@ -100,6 +100,7 @@ const MAX_SCAN_DEPTH = 1000;
  * @property {number} [selectiveLogic] The logic to use for selective activation
  * @property {number} [sticky] The sticky value of the entry
  * @property {number} [cooldown] The cooldown of the entry
+ * @property {number} [delay] The delay of the entry
  */
 
 /**
@@ -112,7 +113,7 @@ const MAX_SCAN_DEPTH = 1000;
 
 /**
  * @typedef TimedEffectType Type of timed effect
- * @type {'sticky'|'cooldown'}
+ * @type {'sticky'|'cooldown'|'delay'}
  */
 // End typedef area
 
@@ -372,6 +373,7 @@ class WorldInfoTimedEffects {
     #buffer = {
         'sticky': [],
         'cooldown': [],
+        'delay': [],
     };
 
     /**
@@ -405,6 +407,8 @@ class WorldInfoTimedEffects {
         'cooldown': (entry) => {
             console.debug('Cooldown ended for entry', entry.uid);
         },
+
+        'delay': () => {},
     };
 
     /**
@@ -531,11 +535,30 @@ class WorldInfoTimedEffects {
     }
 
     /**
+     * Processes entries for the "delay" timed effect.
+     * @param {WIScanEntry[]} buffer Buffer to store the entries
+     */
+    #checkDelayEffect(buffer) {
+        for (const entry of this.#entries) {
+            if (!entry.delay) {
+                continue;
+            }
+
+            if (this.#chat.length < entry.delay) {
+                buffer.push(entry);
+                console.log('Timed effect "delay" applied to entry', entry);
+            }
+        }
+
+    }
+
+    /**
      * Checks for timed effects on chat messages.
      */
     checkTimedEffects() {
         this.#checkTimedEffectOfType('sticky', this.#buffer.sticky, this.#onEnded.sticky.bind(this));
         this.#checkTimedEffectOfType('cooldown', this.#buffer.cooldown, this.#onEnded.cooldown.bind(this));
+        this.#checkDelayEffect(this.#buffer.delay);
     }
 
     /**
@@ -612,7 +635,7 @@ class WorldInfoTimedEffects {
      * @returns {boolean} Is recognized type
      */
     isValidEffectType(type) {
-        return typeof type === 'string' && ['sticky', 'cooldown'].includes(type.trim().toLowerCase());
+        return typeof type === 'string' && ['sticky', 'cooldown', 'delay'].includes(type.trim().toLowerCase());
     }
 
     /**
@@ -1686,7 +1709,7 @@ function displayWorldEntries(name, data, navigation = navigation_option.none, fl
     // Regardless of whether success is displayed or not. Make sure the delete button is available.
     // Do not put this code behind.
     $('#world_popup_delete').off('click').on('click', async () => {
-        const confirmation = await Popup.show.confirm(`Delete the World/Lorebook: "${name}"?`, `This action is irreversible!`);
+        const confirmation = await Popup.show.confirm(`Delete the World/Lorebook: "${name}"?`, 'This action is irreversible!');
         if (!confirmation) {
             return;
         }
@@ -1942,6 +1965,7 @@ const originalDataKeyMap = {
     'groupWeight': 'extensions.group_weight',
     'sticky': 'extensions.sticky',
     'cooldown': 'extensions.cooldown',
+    'delay': 'extensions.delay',
 };
 
 /** Checks the state of the current search, and adds/removes the search sorting option accordingly */
@@ -2590,6 +2614,19 @@ function getWorldEntry(name, data, entry) {
     });
     cooldown.val(entry.cooldown > 0 ? entry.cooldown : '').trigger('input');
 
+    // delay
+    const delay = template.find('input[name="delay"]');
+    delay.data('uid', entry.uid);
+    delay.on('input', function () {
+        const uid = $(this).data('uid');
+        const value = Number($(this).val());
+        data.entries[uid].delay = !isNaN(value) ? value : null;
+
+        setOriginalDataValue(data, uid, 'extensions.delay', data.entries[uid].delay);
+        saveWorldInfo(name, data);
+    });
+    delay.val(entry.delay > 0 ? entry.delay : '').trigger('input');
+
     // probability
     if (entry.probability === undefined) {
         entry.probability = null;
@@ -3140,6 +3177,7 @@ const newEntryDefinition = {
     role: { default: 0, type: 'enum' },
     sticky: { default: null, type: 'number?' },
     cooldown: { default: null, type: 'number?' },
+    delay: { default: null, type: 'number?' },
 };
 
 const newEntryTemplate = Object.fromEntries(
@@ -3534,9 +3572,15 @@ async function checkWorldInfo(chat, maxContext, isDryRun) {
 
             const isSticky = timedEffects.isEffectActive('sticky', entry);
             const isCooldown = timedEffects.isEffectActive('cooldown', entry);
+            const isDelay = timedEffects.isEffectActive('delay', entry);
+
+            if (isDelay) {
+                console.debug(`WI entry ${entry.uid} suppressed by delay`, entry);
+                continue;
+            }
 
             if (isCooldown && !isSticky) {
-                console.debug(`WI entry ${entry.uid} suppressed by cooldown`);
+                console.debug(`WI entry ${entry.uid} suppressed by cooldown`, entry);
                 continue;
             }
 
@@ -3934,6 +3978,7 @@ function convertAgnaiMemoryBook(inputObj) {
             role: extension_prompt_roles.SYSTEM,
             sticky: null,
             cooldown: null,
+            delay: null,
         };
     });
 
@@ -3975,6 +4020,7 @@ function convertRisuLorebook(inputObj) {
             role: extension_prompt_roles.SYSTEM,
             sticky: null,
             cooldown: null,
+            delay: null,
         };
     });
 
@@ -4021,6 +4067,7 @@ function convertNovelLorebook(inputObj) {
             role: extension_prompt_roles.SYSTEM,
             sticky: null,
             cooldown: null,
+            delay: null,
         };
     });
 
@@ -4069,6 +4116,7 @@ function convertCharacterBook(characterBook) {
             vectorized: entry.extensions?.vectorized ?? false,
             sticky: entry.extensions?.sticky ?? null,
             cooldown: entry.extensions?.cooldown ?? null,
+            delay: entry.extensions?.delay ?? null,
         };
     });
 
