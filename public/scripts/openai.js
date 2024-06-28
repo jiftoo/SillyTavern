@@ -3364,6 +3364,7 @@ async function saveOpenAIPreset(name, settings, triggerUi = true) {
         }
     } else {
         toastr.error('Failed to save preset');
+        throw new Error('Failed to save preset');
     }
 }
 
