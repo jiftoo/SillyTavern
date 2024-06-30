@@ -7826,6 +7826,8 @@ window['SillyTavern'].getContext = function () {
         registerDataBankScraper: ScraperManager.registerDataBankScraper,
         callPopup: callPopup,
         callGenericPopup: callGenericPopup,
+        showLoader: showLoader,
+        hideLoader: hideLoader,
         mainApi: main_api,
         extensionSettings: extension_settings,
         ModuleWorkerWrapper: ModuleWorkerWrapper,
