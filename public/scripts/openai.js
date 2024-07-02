@@ -688,7 +688,7 @@ function formatWorldInfo(value) {
         return '';
     }
 
-    if (!oai_settings.wi_format) {
+    if (!oai_settings.wi_format.trim()) {
         return value;
     }
 
