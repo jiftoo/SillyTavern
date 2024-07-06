@@ -3,6 +3,7 @@ import { getRequestHeaders } from '../script.js';
 import { isMobile } from './RossAscends-mods.js';
 import { collapseNewlines } from './power-user.js';
 import { debounce_timeout } from './constants.js';
+import { Popup } from './popup.js';
 
 /**
  * Pagination status string template.
@@ -75,6 +76,20 @@ export function onlyUnique(value, index, array) {
 }
 
 /**
+ * Removes the first occurrence of a specified item from an array
+ *
+ * @param {*[]} array - The array from which to remove the item
+ * @param {*} item - The item to remove from the array
+ * @returns {boolean} - Returns true if the item was successfully removed, false otherwise.
+ */
+export function removeFromArray(array, item) {
+    const index = array.indexOf(item);
+    if (index === -1) return false;
+    array.splice(index, 1);
+    return true;
+}
+
+/**
  * Checks if a string only contains digits.
  * @param {string} str The string to check.
  * @returns {boolean} True if the string only contains digits, false otherwise.
@@ -139,6 +154,7 @@ export function download(content, fileName, contentType) {
     a.href = URL.createObjectURL(file);
     a.download = fileName;
     a.click();
+    URL.revokeObjectURL(a.href);
 }
 
 /**
@@ -291,6 +307,9 @@ export function throttle(func, limit = 300) {
  * @returns {boolean} True if the element is in the viewport, false otherwise.
  */
 export function isElementInViewport(el) {
+    if (!el) {
+        return false;
+    }
     if (typeof jQuery === 'function' && el instanceof jQuery) {
         el = el[0];
     }
@@ -476,14 +495,20 @@ export function sortByCssOrder(a, b) {
  * trimToEndSentence('Hello, world! I am from'); // 'Hello, world!'
  */
 export function trimToEndSentence(input, include_newline = false) {
-    const punctuation = new Set(['.', '!', '?', '*', '"', ')', '}', '`', ']', '$', '。', '！', '？', '”', '）', '】', '’', '」']); // extend this as you see fit
+    if (!input) {
+        return '';
+    }
+
+    const isEmoji = x => /(\p{Emoji_Presentation}|\p{Extended_Pictographic})/gu.test(x);
+    const punctuation = new Set(['.', '!', '?', '*', '"', ')', '}', '`', ']', '$', '。', '！', '？', '”', '）', '】', '’', '」', '_']); // extend this as you see fit
     let last = -1;
 
-    for (let i = input.length - 1; i >= 0; i--) {
-        const char = input[i];
+    const characters = Array.from(input);
+    for (let i = characters.length - 1; i >= 0; i--) {
+        const char = characters[i];
 
-        if (punctuation.has(char)) {
-            if (i > 0 && /[\s\n]/.test(input[i - 1])) {
+        if (punctuation.has(char) || isEmoji(char)) {
+            if (i > 0 && /[\s\n]/.test(characters[i - 1])) {
                 last = i - 1;
             } else {
                 last = i;
@@ -501,10 +526,14 @@ export function trimToEndSentence(input, include_newline = false) {
         return input.trimEnd();
     }
 
-    return input.substring(0, last + 1).trimEnd();
+    return characters.slice(0, last + 1).join('').trimEnd();
 }
 
 export function trimToStartSentence(input) {
+    if (!input) {
+        return '';
+    }
+
     let p1 = input.indexOf('.');
     let p2 = input.indexOf('!');
     let p3 = input.indexOf('?');
@@ -596,6 +625,25 @@ export function isFalseBoolean(arg) {
 }
 
 /**
+ * Parses an array either as a comma-separated string or as a JSON array.
+ * @param {string} value String to parse
+ * @returns {string[]} The parsed array.
+ */
+export function parseStringArray(value) {
+    if (!value || typeof value !== 'string') return [];
+
+    try {
+        const parsedValue = JSON.parse(value);
+        if (!Array.isArray(parsedValue)) {
+            throw new Error('Not an array');
+        }
+        return parsedValue.map(x => String(x));
+    } catch (e) {
+        return value.split(',').map(x => x.trim()).filter(x => x);
+    }
+}
+
+/**
  * Checks if a number is odd.
  * @param {number} number The number to check.
  * @returns {boolean} True if the number is odd, false otherwise.
@@ -631,8 +679,11 @@ function parseTimestamp(timestamp) {
     }
 
     // Unix time (legacy TAI / tags)
-    if (typeof timestamp === 'number') {
-        return moment(timestamp);
+    if (typeof timestamp === 'number' || /^\d+$/.test(timestamp)) {
+        if (isNaN(timestamp) || !isFinite(timestamp) || timestamp < 0) {
+            return moment.invalid();
+        }
+        return moment(Number(timestamp));
     }
 
     // ST "humanized" format pattern
@@ -752,7 +803,7 @@ export function getImageSizeFromDataURL(dataUrl) {
 
 export function getCharaFilename(chid) {
     const context = getContext();
-    const fileName = context.characters[chid ?? context.characterId].avatar;
+    const fileName = context.characters[chid ?? context.characterId]?.avatar;
 
     if (fileName) {
         return fileName.replace(/\.[^/.]+$/, '');
@@ -1021,6 +1072,36 @@ export function extractDataFromPng(data, identifier = 'chara') {
 }
 
 /**
+ * Sends a request to the server to sanitize a given filename
+ *
+ * @param {string} fileName - The name of the file to sanitize
+ * @returns {Promise<string>} A Promise that resolves to the sanitized filename if successful, or rejects with an error message if unsuccessful
+ */
+export async function getSanitizedFilename(fileName) {
+    try {
+        const result = await fetch('/api/files/sanitize-filename', {
+            method: 'POST',
+            headers: getRequestHeaders(),
+            body: JSON.stringify({
+                fileName: fileName,
+            }),
+        });
+
+        if (!result.ok) {
+            const error = await result.text();
+            throw new Error(error);
+        }
+
+        const responseData = await result.json();
+        return responseData.fileName;
+    } catch (error) {
+        toastr.error(String(error), 'Could not sanitize fileName');
+        console.error('Could not sanitize fileName', error);
+        throw error;
+    }
+}
+
+/**
  * Sends a base64 encoded image to the backend to be saved as a file.
  *
  * @param {string} base64Data - The base64 encoded image data.
@@ -1219,6 +1300,9 @@ export async function waitUntilCondition(condition, timeout = 1000, interval = 1
  * uuidv4(); // '3e2fd9e1-0a7a-4f6d-9aaf-8a7a4babe7eb'
  */
 export function uuidv4() {
+    if ('randomUUID' in crypto) {
+        return crypto.randomUUID();
+    }
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
         const r = Math.random() * 16 | 0;
         const v = c === 'x' ? r : (r & 0x3 | 0x8);
@@ -1341,11 +1425,7 @@ export async function extractTextFromHTML(blob, textSelector = 'body') {
  */
 export async function extractTextFromMarkdown(blob) {
     const markdown = await blob.text();
-    const converter = new showdown.Converter();
-    const html = converter.makeHtml(markdown);
-    const domParser = new DOMParser();
-    const document = domParser.parseFromString(DOMPurify.sanitize(html), 'text/html');
-    const text = postProcessText(document.body.textContent, false);
+    const text = postProcessText(markdown, false);
     return text;
 }
 
@@ -1473,22 +1553,75 @@ export function flashHighlight(element, timespan = 2000) {
 }
 
 /**
+ * Checks if the given control has an animation applied to it
+ *
+ * @param {HTMLElement} control - The control element to check for animation
+ * @returns {boolean} Whether the control has an animation applied
+ */
+export function hasAnimation(control) {
+    const animatioName = getComputedStyle(control, null)['animation-name'];
+    return animatioName != 'none';
+}
+
+/**
+ * Run an action once an animation on a control ends. If the control has no animation, the action will be executed immediately.
+ *
+ * @param {HTMLElement} control - The control element to listen for animation end event
+ * @param {(control:*?) => void} callback - The callback function to be executed when the animation ends
+ */
+export function runAfterAnimation(control, callback) {
+    if (hasAnimation(control)) {
+        const onAnimationEnd = () => {
+            control.removeEventListener('animationend', onAnimationEnd);
+            callback(control);
+        };
+        control.addEventListener('animationend', onAnimationEnd);
+    } else {
+        callback(control);
+    }
+}
+
+/**
+ * A common base function for case-insensitive and accent-insensitive string comparisons.
+ *
+ * @param {string} a - The first string to compare.
+ * @param {string} b - The second string to compare.
+ * @param {(a:string,b:string)=>boolean} comparisonFunction - The function to use for the comparison.
+ * @returns {*} - The result of the comparison.
+ */
+export function compareIgnoreCaseAndAccents(a, b, comparisonFunction) {
+    if (!a || !b) return comparisonFunction(a, b); // Return the comparison result if either string is empty
+
+    // Normalize and remove diacritics, then convert to lower case
+    const normalizedA = a.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const normalizedB = b.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+    // Check if the normalized strings are equal
+    return comparisonFunction(normalizedA, normalizedB);
+}
+
+/**
  * Performs a case-insensitive and accent-insensitive substring search.
  * This function normalizes the strings to remove diacritical marks and converts them to lowercase to ensure the search is insensitive to case and accents.
  *
- * @param {string} text - The text in which to search for the substring.
- * @param {string} searchTerm - The substring to search for in the text.
- * @returns {boolean} - Returns true if the searchTerm is found within the text, otherwise returns false.
+ * @param {string} text - The text in which to search for the substring
+ * @param {string} searchTerm - The substring to search for in the text
+ * @returns {boolean} true if the searchTerm is found within the text, otherwise returns false
  */
 export function includesIgnoreCaseAndAccents(text, searchTerm) {
-    if (!text || !searchTerm) return false; // Return false if either string is empty
+    return compareIgnoreCaseAndAccents(text, searchTerm, (a, b) => a?.includes(b) === true);
+}
 
-    // Normalize and remove diacritics, then convert to lower case
-    const normalizedText = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    const normalizedSearchTerm = searchTerm.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-
-    // Check if the normalized text includes the normalized search term
-    return normalizedText.includes(normalizedSearchTerm);
+/**
+ * Performs a case-insensitive and accent-insensitive equality check.
+ * This function normalizes the strings to remove diacritical marks and converts them to lowercase to ensure the search is insensitive to case and accents.
+ *
+ * @param {string} a - The first string to compare
+ * @param {string} b - The second string to compare
+ * @returns {boolean} true if the strings are equal, otherwise returns false
+ */
+export function equalsIgnoreCaseAndAccents(a, b) {
+    return compareIgnoreCaseAndAccents(a, b, (a, b) => a === b);
 }
 
 /**
@@ -1668,4 +1801,58 @@ export function highlightRegex(regexStr) {
     wrapPattern(patterns.delimiters, 'regex-delimiter');
 
     return `<span class="regex-highlight">${regexStr}</span>`;
+}
+
+/**
+ * Confirms if the user wants to overwrite an existing data object (like character, world info, etc) if one exists.
+ * If no data with the name exists, this simply returns true.
+ *
+ * @param {string} type - The type of the check ("World Info", "Character", etc)
+ * @param {string[]} existingNames - The list of existing names to check against
+ * @param {string} name - The new name
+ * @param {object} options - Optional parameters
+ * @param {boolean} [options.interactive=false] - Whether to show a confirmation dialog when needing to overwrite an existing data object
+ * @param {string} [options.actionName='overwrite'] - The action name to display in the confirmation dialog
+ * @param {(existingName:string)=>void} [options.deleteAction=null] - Optional action to execute wen deleting an existing data object on overwrite
+ * @returns {Promise<boolean>} True if the user confirmed the overwrite or there is no overwrite needed, false otherwise
+ */
+export async function checkOverwriteExistingData(type, existingNames, name, { interactive = false, actionName = 'Overwrite', deleteAction = null } = {}) {
+    const existing = existingNames.find(x => equalsIgnoreCaseAndAccents(x, name));
+    if (!existing) {
+        return true;
+    }
+
+    const overwrite = interactive && await Popup.show.confirm(`${type} ${actionName}`, `<p>A ${type.toLowerCase()} with the same name already exists:<br />${existing}</p>Do you want to overwrite it?`);
+    if (!overwrite) {
+        toastr.warning(`${type} ${actionName.toLowerCase()} cancelled. A ${type.toLowerCase()} with the same name already exists:<br />${existing}`, `${type} ${actionName}`, { escapeHtml: false });
+        return false;
+    }
+
+    toastr.info(`Overwriting Existing ${type}:<br />${existing}`, `${type} ${actionName}`, { escapeHtml: false });
+
+    // If there is an action to delete the existing data, do it, as the name might be slightly different so file name would not be the same
+    if (deleteAction) {
+        deleteAction(existing);
+    }
+
+    return true;
+}
+
+/**
+ * Generates a free name by appending a counter to the given name if it already exists in the list
+ *
+ * @param {string} name - The original name to check for existence in the list
+ * @param {string[]} list - The list of names to check for existence
+ * @param {(n: number) => string} [numberFormatter=(n) => ` #${n}`] - The function used to format the counter
+ * @returns {string} The generated free name
+ */
+export function getFreeName(name, list, numberFormatter = (n) => ` #${n}`) {
+    if (!list.includes(name)) {
+        return name;
+    }
+    let counter = 1;
+    while (list.includes(`${name} #${counter}`)) {
+        counter++;
+    }
+    return `${name}${numberFormatter(counter)}`;
 }

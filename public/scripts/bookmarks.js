@@ -12,6 +12,7 @@ import {
     getCharacters,
     chat,
     saveChatConditional,
+    saveItemizedPrompts,
 } from '../script.js';
 import { humanizedDateTime } from './RossAscends-mods.js';
 import {
@@ -23,6 +24,7 @@ import {
     saveGroupBookmarkChat,
     selected_group,
 } from './group-chats.js';
+import { Popup } from './popup.js';
 import { createTagMapFromList } from './tags.js';
 
 import {
@@ -199,6 +201,7 @@ async function createNewBookmark(mesId) {
 
     const mainChat = selected_group ? groups?.find(x => x.id == selected_group)?.chat_id : characters[this_chid].chat;
     const newMetadata = { main_chat: mainChat };
+    await saveItemizedPrompts(name);
 
     if (selected_group) {
         await saveGroupBookmarkChat(selected_group, name, newMetadata, mesId);
@@ -237,8 +240,7 @@ async function convertSoloToGroupChat() {
         return;
     }
 
-    const confirm = await callPopup('Are you sure you want to convert this chat to a group chat?', 'confirm');
-
+    const confirm = await Popup.show.confirm('Convert to group chat', 'Are you sure you want to convert this chat to a group chat?<br />This cannot be reverted.');
     if (!confirm) {
         return;
     }
@@ -334,6 +336,7 @@ async function convertSoloToGroupChat() {
 
     if (!createChatResponse.ok) {
         console.error('Group chat creation unsuccessful');
+        toastr.error('Group chat creation unsuccessful');
         return;
     }
 

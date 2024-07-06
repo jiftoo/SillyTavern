@@ -16,7 +16,6 @@ import {
     eventSource,
     menu_type,
     substituteParams,
-    callPopup,
     sendTextareaMessage,
 } from '../script.js';
 
@@ -39,6 +38,7 @@ import { textgen_types, textgenerationwebui_settings as textgen_settings, getTex
 import { debounce_timeout } from './constants.js';
 
 import Bowser from '../lib/bowser.min.js';
+import { Popup } from './popup.js';
 
 var RPanelPin = document.getElementById('rm_button_panel_pin');
 var LPanelPin = document.getElementById('lm_button_panel_pin');
@@ -303,7 +303,7 @@ export async function favsToHotswap() {
         return;
     }
 
-    buildAvatarList(container, favs, { selectable: true, highlightFavs: false });
+    buildAvatarList(container, favs, { interactable: true, highlightFavs: false });
 }
 
 //changes input bar and send button display depending on connection status
@@ -360,6 +360,7 @@ function RA_autoconnect(PrevApi) {
                     || (textgen_settings.type === textgen_types.INFERMATICAI && secret_state[SECRET_KEYS.INFERMATICAI])
                     || (textgen_settings.type === textgen_types.DREAMGEN && secret_state[SECRET_KEYS.DREAMGEN])
                     || (textgen_settings.type === textgen_types.OPENROUTER && secret_state[SECRET_KEYS.OPENROUTER])
+                    || (textgen_settings.type === textgen_types.FEATHERLESS && secret_state[SECRET_KEYS.FEATHERLESS])
                 ) {
                     $('#api_button_textgenerationwebui').trigger('click');
                 }
@@ -379,6 +380,7 @@ function RA_autoconnect(PrevApi) {
                     || (secret_state[SECRET_KEYS.COHERE] && oai_settings.chat_completion_source == chat_completion_sources.COHERE)
                     || (secret_state[SECRET_KEYS.PERPLEXITY] && oai_settings.chat_completion_source == chat_completion_sources.PERPLEXITY)
                     || (secret_state[SECRET_KEYS.GROQ] && oai_settings.chat_completion_source == chat_completion_sources.GROQ)
+                    || (secret_state[SECRET_KEYS.ZEROONEAI] && oai_settings.chat_completion_source == chat_completion_sources.ZEROONEAI)
                     || (isValidUrl(oai_settings.custom_url) && oai_settings.chat_completion_source == chat_completion_sources.CUSTOM)
                 ) {
                     $('#api_button_openai').trigger('click');
@@ -424,7 +426,7 @@ function restoreUserInput() {
 
     const userInput = LoadLocal('userInput');
     if (userInput) {
-        $('#send_textarea').val(userInput)[0].dispatchEvent(new Event('input', { bubbles:true }));
+        $('#send_textarea').val(userInput)[0].dispatchEvent(new Event('input', { bubbles: true }));
     }
 }
 
@@ -436,10 +438,8 @@ const saveUserInputDebounced = debounce(saveUserInput);
 
 // Make the DIV element draggable:
 
-// THIRD UPDATE, prevent resize window breaks and smartly handle saving
-
 export function dragElement(elmnt) {
-    var hasBeenDraggedByUser = false;
+    var isHeaderBeingDragged = false;
     var isMouseDown = false;
 
     var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
@@ -450,16 +450,16 @@ export function dragElement(elmnt) {
     var elmntName = elmnt.attr('id');
     console.debug(`dragElement called for ${elmntName}`);
     const elmntNameEscaped = $.escapeSelector(elmntName);
-    console.debug(`dragElement escaped name: ${elmntNameEscaped}`);
     const elmntHeader = $(`#${elmntNameEscaped}header`);
 
     if (elmntHeader.length) {
-        elmntHeader.off('mousedown').on('mousedown', (e) => {
-            hasBeenDraggedByUser = true;
+        elmntHeader.off('mousedown').on('mousedown', (e) => { //listener for drag handle repositioning
+            isHeaderBeingDragged = true;
+            isMouseDown = true;
             observer.observe(elmnt.get(0), { attributes: true, attributeFilter: ['style'] });
             dragMouseDown(e);
         });
-        $(elmnt).off('mousedown').on('mousedown', () => {
+        $(elmnt).off('mousedown').on('mousedown', () => { //listener for resize
             isMouseDown = true;
             observer.observe(elmnt.get(0), { attributes: true, attributeFilter: ['style'] });
         });
@@ -467,20 +467,19 @@ export function dragElement(elmnt) {
 
     const observer = new MutationObserver((mutations) => {
         const target = mutations[0].target;
-        if (!$(target).is(':visible')
-            || $(target).hasClass('resizing')
-            || Number((String(target.height).replace('px', ''))) < 50
-            || Number((String(target.width).replace('px', ''))) < 50
-            || power_user.movingUI === false
-            || isMobile()
+        if (!$(target).is(':visible') //abort if element is invisible
+            || $(target).hasClass('resizing') //being auto-resized by other JS code
+            || Number((String(target.height).replace('px', ''))) < 50 //too short
+            || Number((String(target.width).replace('px', ''))) < 50 //too narrow
+            || power_user.movingUI === false // if MUI is not turned on
+            || isMobile() // if it's a mobile screen
         ) {
-            console.debug('aborting mutator');
             return;
         }
-        //console.debug(left + width, winWidth, hasBeenDraggedByUser, isMouseDown)
-        const style = getComputedStyle(target); //use computed values because not all CSS are set by default
-        height = target.offsetHeight;
-        width = target.offsetWidth;
+
+        const style = getComputedStyle(target);
+        height = parseInt(style.height);
+        width = parseInt(style.width);
         top = parseInt(style.top);
         left = parseInt(style.left);
         right = parseInt(style.right);
@@ -495,53 +494,53 @@ export function dragElement(elmnt) {
         topBarFirstX = parseInt(topbarstyle.marginInline);
         topBarLastY = parseInt(topbarstyle.height);
 
-        /*console.log(`
-        winWidth: ${winWidth}, winHeight: ${winHeight}
-        sheldWidth: ${sheldWidth}
-        X: ${$(elmnt).css('left')}
-        Y: ${$(elmnt).css('top')}
-        MaxX: ${maxX}, MaxY: ${maxY}
-        height: ${height}
-        width: ${width}
-        Topbar 1st X: ${topBarFirstX}
-        TopBar lastX: ${topBarLastX}
-        `);*/
-
-
         //prepare an empty poweruser object for the item being altered if we don't have one already
         if (!power_user.movingUIState[elmntName]) {
             console.debug(`adding config property for ${elmntName}`);
             power_user.movingUIState[elmntName] = {};
         }
 
-        //only record position changes if caused by a user click-drag
-        if (hasBeenDraggedByUser && isMouseDown) {
-            power_user.movingUIState[elmntName].top = top;
-            power_user.movingUIState[elmntName].left = left;
-            power_user.movingUIState[elmntName].right = right;
-            power_user.movingUIState[elmntName].bottom = bottom;
-            power_user.movingUIState[elmntName].margin = 'unset';
-        }
-
         //handle resizing
-        if (!hasBeenDraggedByUser && isMouseDown) {
-            console.debug('saw resize, NOT header drag');
+        if (!isHeaderBeingDragged && isMouseDown) { //if user is dragging the resize handle (not in header)
+            let imgHeight, imgWidth, imageAspectRatio;
+            let containerAspectRatio = height / width;
 
-            //prevent resizing offscreen
-            if (top + elmnt.height() >= winHeight) {
-                console.debug('resizing height to prevent offscreen');
-                elmnt.css('height', winHeight - top - 1 + 'px');
-            }
+            //force aspect ratio for zoomed avatars
+            if ($(elmnt).attr('id').startsWith('zoomFor_')) {
+                let zoomedAvatarImage = $(elmnt).find('.zoomed_avatar_img');
+                imgHeight = zoomedAvatarImage.height();
+                imgWidth = zoomedAvatarImage.width();
+                imageAspectRatio = imgHeight / imgWidth;
 
-            if (left + elmnt.width() >= winWidth) {
-                console.debug('resizing width to prevent offscreen');
-                elmnt.css('width', winWidth - left - 1 + 'px');
+                // Maintain aspect ratio
+                if (containerAspectRatio !== imageAspectRatio) {
+                    elmnt.css('width', elmnt.width());
+                    elmnt.css('height', elmnt.width() * imageAspectRatio);
+                }
+
+                // Prevent resizing offscreen
+                if (top + elmnt.height() >= winHeight) {
+                    elmnt.css('height', winHeight - top - 1 + 'px');
+                    elmnt.css('width', (winHeight - top - 1) / imageAspectRatio + 'px');
+                }
+
+                if (left + elmnt.width() >= winWidth) {
+                    elmnt.css('width', winWidth - left - 1 + 'px');
+                    elmnt.css('height', (winWidth - left - 1) * imageAspectRatio + 'px');
+                }
+            } else { //prevent divs that are not zoomedAvatars from resizing offscreen
+
+                if (top + elmnt.height() >= winHeight) {
+                    elmnt.css('height', winHeight - top - 1 + 'px');
+                }
+
+                if (left + elmnt.width() >= winWidth) {
+                    elmnt.css('width', winWidth - left - 1 + 'px');
+                }
             }
 
             //prevent resizing from top left into the top bar
-            if (top < topBarLastY && maxX >= topBarFirstX && left <= topBarFirstX
-            ) {
-                console.debug('prevent topbar underlap resize');
+            if (top < topBarLastY && maxX >= topBarFirstX && left <= topBarFirstX) {
                 elmnt.css('width', width - 1 + 'px');
             }
 
@@ -550,11 +549,11 @@ export function dragElement(elmnt) {
             elmnt.css('top', top);
 
             //set a listener for mouseup to save new width/height
-            elmnt.off('mouseup').on('mouseup', () => {
-                console.debug(`Saving ${elmntName} Height/Width`);
+            $(window).off('mouseup').on('mouseup', () => {
+                console.log(`Saving ${elmntName} Height/Width`);
                 // check if the height or width actually changed
-                if (power_user.movingUIState[elmntName].width === width && power_user.movingUIState[elmntName].height === height) {
-                    console.debug('no change detected, aborting save');
+                if (power_user.movingUIState[elmntName].width === elmnt.width() && power_user.movingUIState[elmntName].height === elmnt.height()) {
+                    console.log('no change detected, aborting save');
                     return;
                 }
 
@@ -562,12 +561,27 @@ export function dragElement(elmnt) {
                 power_user.movingUIState[elmntName].height = height;
                 eventSource.emit('resizeUI', elmntName);
                 saveSettingsDebounced();
+                imgHeight = null;
+                imgWidth = null;
+                height = null;
+                width = null;
+
+                containerAspectRatio = null;
+                imageAspectRatio = null;
+                $(window).off('mouseup');
             });
         }
 
-        //handle dragging hit detection
-        if (hasBeenDraggedByUser && isMouseDown) {
-            //prevent dragging offscreen
+        //only record position changes if header is being dragged
+        power_user.movingUIState[elmntName].top = top;
+        power_user.movingUIState[elmntName].left = left;
+        power_user.movingUIState[elmntName].right = right;
+        power_user.movingUIState[elmntName].bottom = bottom;
+        power_user.movingUIState[elmntName].margin = 'unset';
+
+        //handle dragging hit detection to prevent dragging offscreen
+        if (isHeaderBeingDragged && isMouseDown) {
+
             if (top <= 0) {
                 elmnt.css('top', '0px');
             } else if (maxY >= winHeight) {
@@ -579,27 +593,14 @@ export function dragElement(elmnt) {
             } else if (maxX >= winWidth) {
                 elmnt.css('left', winWidth - maxX + left - 1 + 'px');
             }
-
-            //prevent underlap with topbar div
-            /*
-            if (top < topBarLastY
-                && (maxX >= topBarFirstX && left <= topBarFirstX //elmnt is hitting topbar from left side
-                    || left <= topBarLastX && maxX >= topBarLastX //elmnt is hitting topbar from right side
-                    || left >= topBarFirstX && maxX <= topBarLastX) //elmnt hitting topbar in the middle
-            ) {
-                console.debug('topbar hit')
-                elmnt.css('top', top + 1 + "px");
-            }
-            */
         }
 
-        // Check if the element header exists and set the listener on the grabber
+        // Check if the element header exists and set the reposition listener on the grabber in the header
         if (elmntHeader.length) {
             elmntHeader.off('mousedown').on('mousedown', (e) => {
-                console.debug('listener started from header');
                 dragMouseDown(e);
             });
-        } else {
+        } else { //if no header, put the listener on the elmnt itself.
             elmnt.off('mousedown').on('mousedown', dragMouseDown);
         }
     });
@@ -607,7 +608,7 @@ export function dragElement(elmnt) {
     function dragMouseDown(e) {
 
         if (e) {
-            hasBeenDraggedByUser = true;
+            isHeaderBeingDragged = true;
             e.preventDefault();
             pos3 = e.clientX; //mouse X at click
             pos4 = e.clientY; //mouse Y at click
@@ -639,34 +640,20 @@ export function dragElement(elmnt) {
         elmnt.css('margin', 'unset');
         elmnt.css('left', (elmnt.offset().left - pos1) + 'px');
         elmnt.css('top', (elmnt.offset().top - pos2) + 'px');
-        elmnt.css('right', ((winWidth - maxX) + 'px'));
-        elmnt.css('bottom', ((winHeight - maxY) + 'px'));
+        /*         elmnt.css('right', ((winWidth - maxX) + 'px'));
+                elmnt.css('bottom', ((winHeight - maxY) + 'px')); */
 
-        // Height/Width here are for visuals only, and are not saved to settings
-        // required because some divs do hot have a set width/height..
-        // and will defaults to shrink to min value of 100px set in CSS file
+        // Height/Width here are for visuals only, and are not saved to settings.
+        // This is required because some divs do hot have a set width/height
+        // and will default to shrink to min value of 100px set in CSS file
         elmnt.css('height', height);
         elmnt.css('width', width);
-        /*
-                console.log(`
-                             winWidth: ${winWidth}, winHeight: ${winHeight}
-                             sheldWidth: ${sheldWidth}
-                             X: ${$(elmnt).css('left')}
-                             Y: ${$(elmnt).css('top')}
-                             MaxX: ${maxX}, MaxY: ${maxY}
-                             height: ${height}
-                             width: ${width}
-                             Topbar 1st X: ${topBarFirstX}
-                             TopBar lastX: ${topBarLastX}
-                             `);
-                             */
-
         return;
     }
 
     function closeDragElement() {
         console.debug('drag finished');
-        hasBeenDraggedByUser = false;
+        isHeaderBeingDragged = false;
         isMouseDown = false;
         $(document).off('mouseup', closeDragElement);
         $(document).off('mousemove', elementDrag);
@@ -676,6 +663,12 @@ export function dragElement(elmnt) {
         observer.disconnect();
         console.debug(`Saving ${elmntName} UI position`);
         saveSettingsDebounced();
+        top = null;
+        left = null;
+        right = null;
+        bottom = null;
+        maxX = null;
+        maxY = null;
     }
 }
 
@@ -730,6 +723,16 @@ export function initRossMods() {
 
     if (power_user.auto_connect) {
         RA_autoconnect();
+    }
+
+    const userAgent = getParsedUA();
+    console.debug('User Agent', userAgent);
+    const isMobileSafari = /iPad|iPhone|iPod/.test(navigator.platform) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const isDesktopSafari = userAgent?.browser?.name === 'Safari' && userAgent?.platform?.type === 'desktop';
+    const isIOS = userAgent?.os?.name === 'iOS';
+
+    if (isIOS || isMobileSafari || isDesktopSafari) {
+        document.body.classList.add('safari');
     }
 
     $('#main_api').change(function () {
@@ -935,8 +938,8 @@ export function initRossMods() {
         return false;
     }
 
-    $(document).on('keydown', function (event) {
-        processHotkeys(event.originalEvent);
+    $(document).on('keydown', async function (event) {
+        await processHotkeys(event.originalEvent);
     });
 
     const hotkeyTargets = {
@@ -948,7 +951,7 @@ export function initRossMods() {
     /**
      * @param {KeyboardEvent} event
      */
-    function processHotkeys(event) {
+    async function processHotkeys(event) {
         //Enter to send when send_textarea in focus
         if (document.activeElement == hotkeyTargets['send_textarea']) {
             const sendOnEnter = shouldSendOnEnter();
@@ -1012,20 +1015,17 @@ export function initRossMods() {
                 if (skipConfirm) {
                     doRegenerate();
                 } else {
-                    const popupText = `
-                    <div class="marginBot10">Are you sure you want to regenerate the latest message?</div>
-                    <label class="checkbox_label justifyCenter" for="regenerateWithCtrlEnter">
-                        <input type="checkbox" id="regenerateWithCtrlEnter">
-                        Don't ask again
-                    </label>`;
-                    callPopup(popupText, 'confirm').then(result => {
-                        if (!result) {
-                            return;
-                        }
-                        const regenerateWithCtrlEnter = $('#regenerateWithCtrlEnter').prop('checked');
-                        SaveLocal(skipConfirmKey, regenerateWithCtrlEnter);
-                        doRegenerate();
+                    let regenerateWithCtrlEnter = false;
+                    const result = await Popup.show.confirm('Regenerate Message', 'Are you sure you want to regenerate the latest message?', {
+                        customInputs: [{ id: 'regenerateWithCtrlEnter', label: 'Don\'t ask again' }],
+                        onClose: (popup) => regenerateWithCtrlEnter = popup.inputResults.get('regenerateWithCtrlEnter') ?? false,
                     });
+                    if (!result) {
+                        return;
+                    }
+
+                    SaveLocal(skipConfirmKey, regenerateWithCtrlEnter);
+                    doRegenerate();
                 }
                 return;
             } else {
@@ -1105,6 +1105,9 @@ export function initRossMods() {
         }
 
         if (event.key == 'Escape') { //closes various panels
+            // Do not close panels if we are currently inside a popup
+            if (Popup.util.isPopupOpen())
+                return;
 
             //dont override Escape hotkey functions from script.js
             //"close edit box" and "cancel stream generation".

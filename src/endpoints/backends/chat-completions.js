@@ -6,7 +6,7 @@ const fs = require("fs");
 const { jsonParser } = require('../../express-common');
 const { CHAT_COMPLETION_SOURCES, GEMINI_SAFETY, BISON_SAFETY, OPENROUTER_HEADERS } = require('../../constants');
 const { forwardFetchResponse, getConfigValue, tryParse, uuidv4, mergeObjectWithYaml, excludeKeysByYaml, color } = require('../../util');
-const { convertClaudeMessages, convertGooglePrompt, convertTextCompletionPrompt, convertCohereMessages, convertMistralMessages } = require('../../prompt-converters');
+const { convertClaudeMessages, convertGooglePrompt, convertTextCompletionPrompt, convertCohereMessages, convertMistralMessages, convertCohereTools } = require('../../prompt-converters');
 
 const { readSecret, SECRET_KEYS } = require('../secrets');
 const { getTokenizerModel, getSentencepiceTokenizer, getTiktokenTokenizer, sentencepieceTokenizers, TEXT_COMPLETION_MODELS } = require('../tokenizers');
@@ -17,6 +17,8 @@ const API_MISTRAL = 'https://api.mistral.ai/v1';
 const API_COHERE = 'https://api.cohere.ai/v1';
 const API_PERPLEXITY = 'https://api.perplexity.ai';
 const API_GROQ = 'https://api.groq.com/openai/v1';
+const API_MAKERSUITE = 'https://generativelanguage.googleapis.com';
+const API_01AI = 'https://api.01.ai/v1';
 
 /**
  * Applies a post-processing step to the generated messages.
@@ -115,10 +117,11 @@ async function sendClaudeRequest(request, response) {
         request.socket.on('close', function () {
             controller.abort();
         });
+        const additionalHeaders = {};
         let use_system_prompt = (request.body.model.startsWith('claude-2') || request.body.model.startsWith('claude-3')) && request.body.claude_use_sysprompt;
         let converted_prompt = convertClaudeMessages(request.body.messages, request.body.assistant_prefill, use_system_prompt, request.body.human_sysprompt_message, request.body.char_name, request.body.user_name);
         // Add custom stop sequences
-        const stopSequences = ['\n\nHuman:', '\n\nSystem:', '\n\nAssistant:'];
+        const stopSequences = [];
         if (Array.isArray(request.body.stop)) {
             stopSequences.push(...request.body.stop);
         }
@@ -136,6 +139,18 @@ async function sendClaudeRequest(request, response) {
         if (use_system_prompt) {
             requestBody.system = converted_prompt.systemPrompt;
         }
+        if (Array.isArray(request.body.tools) && request.body.tools.length > 0) {
+            // Claude doesn't do prefills on function calls, and doesn't allow empty messages
+            if (converted_prompt.messages.length && converted_prompt.messages[converted_prompt.messages.length - 1].role === 'assistant') {
+                converted_prompt.messages.push({ role: 'user', content: '.' });
+            }
+            additionalHeaders['anthropic-beta'] = 'tools-2024-05-16';
+            requestBody.tool_choice = { type: request.body.tool_choice === 'required' ? 'any' : 'auto' };
+            requestBody.tools = request.body.tools
+                .filter(tool => tool.type === 'function')
+                .map(tool => tool.function)
+                .map(fn => ({ name: fn.name, description: fn.description, input_schema: fn.parameters }));
+        }
         console.log('Claude request:', requestBody);
 
         const generateResponse = await fetch(apiUrl + '/messages', {
@@ -146,6 +161,7 @@ async function sendClaudeRequest(request, response) {
                 'Content-Type': 'application/json',
                 'anthropic-version': '2023-06-01',
                 'x-api-key': apiKey,
+                ...additionalHeaders,
             },
             timeout: 0,
         });
@@ -163,8 +179,8 @@ async function sendClaudeRequest(request, response) {
             const responseText = generateResponseJson.content[0].text;
             console.log('Claude response:', generateResponseJson);
 
-            // Wrap it back to OAI format
-            const reply = { choices: [{ 'message': { 'content': responseText } }] };
+            // Wrap it back to OAI format + save the original content
+            const reply = { choices: [{ 'message': { 'content': responseText } }], content: generateResponseJson.content };
             return response.send(reply);
         }
     } catch (error) {
@@ -233,9 +249,10 @@ async function sendScaleRequest(request, response) {
  * @param {express.Response} response Express response
  */
 async function sendMakerSuiteRequest(request, response) {
-    const apiKey = readSecret(request.user.directories, SECRET_KEYS.MAKERSUITE);
+    const apiUrl = new URL(request.body.reverse_proxy || API_MAKERSUITE);
+    const apiKey = request.body.reverse_proxy ? request.body.proxy_password : readSecret(request.user.directories, SECRET_KEYS.MAKERSUITE);
 
-    if (!apiKey) {
+    if (!request.body.reverse_proxy && !apiKey) {
         console.log('MakerSuite API key is missing.');
         return response.status(400).send({ error: true });
     }
@@ -317,7 +334,7 @@ async function sendMakerSuiteRequest(request, response) {
             ? (stream ? 'streamGenerateContent' : 'generateContent')
             : (isText ? 'generateText' : 'generateMessage');
 
-        const generateResponse = await fetch(`https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:${responseType}?key=${apiKey}${stream ? '&alt=sse' : ''}`, {
+        const generateResponse = await fetch(`${apiUrl.origin}/${apiVersion}/models/${model}:${responseType}?key=${apiKey}${stream ? '&alt=sse' : ''}`, {
             body: JSON.stringify(body),
             method: 'POST',
             headers: {
@@ -485,6 +502,11 @@ async function sendMistralAIRequest(request, response) {
             'random_seed': request.body.seed === -1 ? undefined : request.body.seed,
         };
 
+        if (Array.isArray(request.body.tools) && request.body.tools.length > 0) {
+            requestBody['tools'] = request.body.tools;
+            requestBody['tool_choice'] = request.body.tool_choice === 'required' ? 'any' : 'auto';
+        }
+
         const config = {
             method: 'POST',
             headers: {
@@ -543,11 +565,18 @@ async function sendCohereRequest(request, response) {
     try {
         const convertedHistory = convertCohereMessages(request.body.messages, request.body.char_name, request.body.user_name);
         const connectors = [];
+        const tools = [];
 
         if (request.body.websearch) {
             connectors.push({
                 id: 'web-search',
             });
+        }
+
+        if (Array.isArray(request.body.tools) && request.body.tools.length > 0) {
+            tools.push(...convertCohereTools(request.body.tools));
+            // Can't have both connectors and tools in the same request
+            connectors.splice(0, connectors.length);
         }
 
         // https://docs.cohere.com/reference/chat
@@ -568,8 +597,7 @@ async function sendCohereRequest(request, response) {
             prompt_truncation: 'AUTO_PRESERVE_ORDER',
             connectors: connectors,
             documents: [],
-            tools: [],
-            tool_results: [],
+            tools: tools,
             search_queries_only: false,
         };
 
@@ -643,6 +671,10 @@ router.post('/status', jsonParser, async function (request, response_getstatus_o
     } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.COHERE) {
         api_url = API_COHERE;
         api_key_openai = readSecret(request.user.directories, SECRET_KEYS.COHERE);
+        headers = {};
+    } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.ZEROONEAI) {
+        api_url = API_01AI;
+        api_key_openai = readSecret(request.user.directories, SECRET_KEYS.ZEROONEAI);
         headers = {};
     } else {
         console.log('This chat completion source is not supported yet.');
@@ -893,6 +925,23 @@ router.post('/generate', jsonParser, function (request, response) {
         apiKey = readSecret(request.user.directories, SECRET_KEYS.GROQ);
         headers = {};
         bodyParams = {};
+
+        // 'required' tool choice is not supported by Groq
+        if (request.body.tool_choice === 'required') {
+            if (Array.isArray(request.body.tools) && request.body.tools.length > 0) {
+                request.body.tool_choice = request.body.tools.length > 1
+                    ? 'auto' :
+                    { type: 'function', function: { name: request.body.tools[0]?.function?.name } };
+
+            } else {
+                request.body.tool_choice = 'none';
+            }
+        }
+    } else if (request.body.chat_completion_source === CHAT_COMPLETION_SOURCES.ZEROONEAI) {
+        apiUrl = API_01AI;
+        apiKey = readSecret(request.user.directories, SECRET_KEYS.ZEROONEAI);
+        headers = {};
+        bodyParams = {};
     } else {
         console.log('This chat completion source is not supported yet.');
         return response.status(400).send({ error: true });
@@ -918,6 +967,11 @@ router.post('/generate', jsonParser, function (request, response) {
     request.socket.on('close', function () {
         controller.abort();
     });
+
+    if (!isTextCompletion) {
+        bodyParams['tools'] = request.body.tools;
+        bodyParams['tool_choice'] = request.body.tool_choice;
+    }
 
     const requestBody = {
         'messages': isTextCompletion === false ? request.body.messages : undefined,

@@ -3,11 +3,9 @@ import {
     characters,
     chat,
     chat_metadata,
-    crop_data,
     default_avatar,
     eventSource,
     event_types,
-    getCropPopup,
     getRequestHeaders,
     getThumbnailUrl,
     name1,
@@ -24,9 +22,12 @@ import { PAGINATION_TEMPLATE, debounce, delay, download, ensureImageFormatSuppor
 import { debounce_timeout } from './constants.js';
 import { FILTER_TYPES, FilterHelper } from './filters.js';
 import { selected_group } from './group-chats.js';
+import { POPUP_TYPE, Popup } from './popup.js';
 
 let savePersonasPage = 0;
 const GRID_STORAGE_KEY = 'Personas_GridView';
+const DEFAULT_DEPTH = 2;
+const DEFAULT_ROLE = 0;
 export let user_avatar = '';
 export const personasFilter = new FilterHelper(debounce(getUserAvatars, debounce_timeout.quick));
 
@@ -119,7 +120,7 @@ function verifyPersonaSearchSortRule() {
         flashHighlight(selector);
     }
     // If search got cleared, we make sure to hide the option and go back to the one before
-    if (!searchTerm && !isHidden) {
+    if (!searchTerm) {
         searchOption.attr('hidden', '');
         selector.val(power_user.persona_sort_order);
     }
@@ -276,13 +277,15 @@ async function changeUserAvatar(e) {
     let url = '/api/avatars/upload';
 
     if (!power_user.never_resize_avatars) {
-        const confirmation = await callPopup(getCropPopup(dataUrl), 'avatarToCrop', '', { okButton: 'Crop', large: true, wide: true });
-        if (!confirmation) {
+        const dlg = new Popup('Set the crop position of the avatar image', POPUP_TYPE.CROP, '', { cropImage: dataUrl });
+        const result = await dlg.show();
+
+        if (!result) {
             return;
         }
 
-        if (crop_data !== undefined) {
-            url += `?crop=${encodeURIComponent(JSON.stringify(crop_data))}`;
+        if (dlg.cropData !== undefined) {
+            url += `?crop=${encodeURIComponent(JSON.stringify(dlg.cropData))}`;
         }
     }
 
@@ -371,6 +374,8 @@ export function initPersona(avatarId, personaName, personaDescription) {
     power_user.persona_descriptions[avatarId] = {
         description: personaDescription || '',
         position: persona_description_positions.IN_PROMPT,
+        depth: DEFAULT_DEPTH,
+        role: DEFAULT_ROLE,
     };
 
     saveSettingsDebounced();
@@ -415,6 +420,8 @@ export async function convertCharacterToPersona(characterId = null) {
     power_user.persona_descriptions[overwriteName] = {
         description: description,
         position: persona_description_positions.IN_PROMPT,
+        depth: DEFAULT_DEPTH,
+        role: DEFAULT_ROLE,
     };
 
     // If the user is currently using this persona, update the description
@@ -447,11 +454,17 @@ export function setPersonaDescription() {
         power_user.persona_description_position = persona_description_positions.IN_PROMPT;
     }
 
+    $('#persona_depth_position_settings').toggle(power_user.persona_description_position === persona_description_positions.AT_DEPTH);
     $('#persona_description').val(power_user.persona_description);
+    $('#persona_depth_value').val(power_user.persona_description_depth ?? DEFAULT_DEPTH);
     $('#persona_description_position')
         .val(power_user.persona_description_position)
-        .find(`option[value='${power_user.persona_description_position}']`)
+        .find(`option[value="${power_user.persona_description_position}"]`)
         .attr('selected', String(true));
+    $('#persona_depth_role')
+        .val(power_user.persona_description_role)
+        .find(`option[value="${power_user.persona_description_role}"]`)
+        .prop('selected', String(true));
     countPersonaDescriptionTokens();
 }
 
@@ -473,12 +486,20 @@ export function autoSelectPersona(name) {
 async function updatePersonaNameIfExists(avatarId, newName) {
     if (avatarId in power_user.personas) {
         power_user.personas[avatarId] = newName;
-        await getUserAvatars(true, avatarId);
-        saveSettingsDebounced();
         console.log(`Updated persona name for ${avatarId} to ${newName}`);
     } else {
-        console.log(`Persona name ${avatarId} was not updated because it does not exist`);
+        power_user.personas[avatarId] = newName;
+        power_user.persona_descriptions[avatarId] = {
+            description: '',
+            position: persona_description_positions.IN_PROMPT,
+            depth: DEFAULT_DEPTH,
+            role: DEFAULT_ROLE,
+        };
+        console.log(`Created persona name for ${avatarId} as ${newName}`);
     }
+
+    await getUserAvatars(true, avatarId);
+    saveSettingsDebounced();
 }
 
 async function bindUserNameToPersona(e) {
@@ -511,6 +532,8 @@ async function bindUserNameToPersona(e) {
             power_user.persona_descriptions[avatarId] = {
                 description: isCurrentPersona ? power_user.persona_description : '',
                 position: isCurrentPersona ? power_user.persona_description_position : persona_description_positions.IN_PROMPT,
+                depth: isCurrentPersona ? power_user.persona_description_depth : DEFAULT_DEPTH,
+                role: isCurrentPersona ? power_user.persona_description_role : DEFAULT_ROLE,
             };
         }
 
@@ -551,19 +574,53 @@ function selectCurrentPersona() {
         const descriptor = power_user.persona_descriptions[user_avatar];
 
         if (descriptor) {
-            power_user.persona_description = descriptor.description;
-            power_user.persona_description_position = descriptor.position;
+            power_user.persona_description = descriptor.description ?? '';
+            power_user.persona_description_position = descriptor.position ?? persona_description_positions.IN_PROMPT;
+            power_user.persona_description_depth = descriptor.depth ?? DEFAULT_DEPTH;
+            power_user.persona_description_role = descriptor.role ?? DEFAULT_ROLE;
         } else {
             power_user.persona_description = '';
             power_user.persona_description_position = persona_description_positions.IN_PROMPT;
-            power_user.persona_descriptions[user_avatar] = { description: '', position: persona_description_positions.IN_PROMPT };
+            power_user.persona_description_depth = DEFAULT_DEPTH;
+            power_user.persona_description_role = DEFAULT_ROLE;
+            power_user.persona_descriptions[user_avatar] = { description: '', position: persona_description_positions.IN_PROMPT, depth: DEFAULT_DEPTH, role: DEFAULT_ROLE };
         }
 
         setPersonaDescription();
     }
 }
 
-async function lockUserNameToChat() {
+/**
+ * Checks if the persona is locked for the current chat.
+ * @returns {boolean} Whether the persona is locked
+ */
+function isPersonaLocked() {
+    return !!chat_metadata['persona'];
+}
+
+/**
+ * Locks or unlocks the persona for the current chat.
+ * @param {boolean} state Desired lock state
+ * @returns {Promise<void>}
+ */
+export async function setPersonaLockState(state) {
+    return state ? await lockPersona() : await unlockPersona();
+}
+
+/**
+ * Toggle the persona lock state for the current chat.
+ * @returns {Promise<void>}
+ */
+export async function togglePersonaLock() {
+    return isPersonaLocked()
+        ? await unlockPersona()
+        : await lockPersona();
+}
+
+/**
+ * Unlock the persona for the current chat.
+ */
+async function unlockPersona() {
     if (chat_metadata['persona']) {
         console.log(`Unlocking persona for this chat ${chat_metadata['persona']}`);
         delete chat_metadata['persona'];
@@ -572,9 +629,13 @@ async function lockUserNameToChat() {
             toastr.info('User persona is now unlocked for this chat. Click the "Lock" again to revert.', 'Persona unlocked');
         }
         updateUserLockIcon();
-        return;
     }
+}
 
+/**
+ * Lock the persona for the current chat.
+ */
+async function lockPersona() {
     if (!(user_avatar in power_user.personas)) {
         console.log(`Creating a new persona ${user_avatar}`);
         if (power_user.persona_show_notifications) {
@@ -597,6 +658,7 @@ async function lockUserNameToChat() {
     }
     updateUserLockIcon();
 }
+
 
 async function deleteUserAvatar(e) {
     e?.stopPropagation();
@@ -661,6 +723,8 @@ function onPersonaDescriptionInput() {
             object = {
                 description: power_user.persona_description,
                 position: Number($('#persona_description_position').find(':selected').val()),
+                depth: Number($('#persona_depth_value').val()),
+                role: Number($('#persona_depth_role').find(':selected').val()),
             };
             power_user.persona_descriptions[user_avatar] = object;
         }
@@ -674,26 +738,55 @@ function onPersonaDescriptionInput() {
     saveSettingsDebounced();
 }
 
+function onPersonaDescriptionDepthValueInput() {
+    power_user.persona_description_depth = Number($('#persona_depth_value').val());
+
+    if (power_user.personas[user_avatar]) {
+        const object = getOrCreatePersonaDescriptor();
+        object.depth = power_user.persona_description_depth;
+    }
+
+    saveSettingsDebounced();
+}
+
+function onPersonaDescriptionDepthRoleInput() {
+    power_user.persona_description_role = Number($('#persona_depth_role').find(':selected').val());
+
+    if (power_user.personas[user_avatar]) {
+        const object = getOrCreatePersonaDescriptor();
+        object.role = power_user.persona_description_role;
+    }
+
+    saveSettingsDebounced();
+}
+
 function onPersonaDescriptionPositionInput() {
     power_user.persona_description_position = Number(
         $('#persona_description_position').find(':selected').val(),
     );
 
     if (power_user.personas[user_avatar]) {
-        let object = power_user.persona_descriptions[user_avatar];
-
-        if (!object) {
-            object = {
-                description: power_user.persona_description,
-                position: power_user.persona_description_position,
-            };
-            power_user.persona_descriptions[user_avatar] = object;
-        }
-
+        const object = getOrCreatePersonaDescriptor();
         object.position = power_user.persona_description_position;
     }
 
     saveSettingsDebounced();
+    $('#persona_depth_position_settings').toggle(power_user.persona_description_position === persona_description_positions.AT_DEPTH);
+}
+
+function getOrCreatePersonaDescriptor() {
+    let object = power_user.persona_descriptions[user_avatar];
+
+    if (!object) {
+        object = {
+            description: power_user.persona_description,
+            position: power_user.persona_description_position,
+            depth: power_user.persona_description_depth,
+            role: power_user.persona_description_role,
+        };
+        power_user.persona_descriptions[user_avatar] = object;
+    }
+    return object;
 }
 
 async function setDefaultPersona(e) {
@@ -915,10 +1008,12 @@ export function initPersonas() {
     $(document).on('click', '.bind_user_name', bindUserNameToPersona);
     $(document).on('click', '.set_default_persona', setDefaultPersona);
     $(document).on('click', '.delete_avatar', deleteUserAvatar);
-    $('#lock_user_name').on('click', lockUserNameToChat);
+    $('#lock_user_name').on('click', togglePersonaLock);
     $('#create_dummy_persona').on('click', createDummyPersona);
     $('#persona_description').on('input', onPersonaDescriptionInput);
     $('#persona_description_position').on('input', onPersonaDescriptionPositionInput);
+    $('#persona_depth_value').on('input', onPersonaDescriptionDepthValueInput);
+    $('#persona_depth_role').on('input', onPersonaDescriptionDepthRoleInput);
     $('#personas_backup').on('click', onBackupPersonas);
     $('#personas_restore').on('click', () => $('#personas_restore_input').trigger('click'));
     $('#personas_restore_input').on('change', onPersonasRestoreInput);

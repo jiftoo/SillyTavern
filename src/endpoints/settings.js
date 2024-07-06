@@ -3,7 +3,7 @@ const path = require('path');
 const express = require('express');
 const _ = require('lodash');
 const writeFileAtomicSync = require('write-file-atomic').sync;
-const { PUBLIC_DIRECTORIES, SETTINGS_FILE } = require('../constants');
+const { SETTINGS_FILE } = require('../constants');
 const { getConfigValue, generateTimestamp, removeOldBackups } = require('../util');
 const { jsonParser } = require('../express-common');
 const { getAllUserHandles, getUserDirectories } = require('../users');
@@ -27,12 +27,12 @@ const AUTOSAVE_FUNCTIONS = new Map();
  */
 function triggerAutoSave(handle) {
     if (!AUTOSAVE_FUNCTIONS.has(handle)) {
-        const throttledAutoSave = _.throttle(() => backupUserSettings(handle), AUTOSAVE_INTERVAL);
+        const throttledAutoSave = _.throttle(() => backupUserSettings(handle, true), AUTOSAVE_INTERVAL);
         AUTOSAVE_FUNCTIONS.set(handle, throttledAutoSave);
     }
 
     const functionToCall = AUTOSAVE_FUNCTIONS.get(handle);
-    if (functionToCall) {
+    if (functionToCall && typeof functionToCall === 'function') {
         functionToCall();
     }
 }
@@ -110,14 +110,10 @@ function readPresetsFromDirectory(directoryPath, options = {}) {
 
 async function backupSettings() {
     try {
-        if (!fs.existsSync(PUBLIC_DIRECTORIES.backups)) {
-            fs.mkdirSync(PUBLIC_DIRECTORIES.backups);
-        }
-
         const userHandles = await getAllUserHandles();
 
         for (const handle of userHandles) {
-            backupUserSettings(handle);
+            backupUserSettings(handle, true);
         }
     } catch (err) {
         console.log('Could not backup settings file', err);
@@ -127,19 +123,70 @@ async function backupSettings() {
 /**
  * Makes a backup of the user's settings file.
  * @param {string} handle User handle
+ * @param {boolean} preventDuplicates Prevent duplicate backups
  * @returns {void}
  */
-function backupUserSettings(handle) {
+function backupUserSettings(handle, preventDuplicates) {
     const userDirectories = getUserDirectories(handle);
-    const backupFile = path.join(PUBLIC_DIRECTORIES.backups, `${getFilePrefix(handle)}${generateTimestamp()}.json`);
+    const backupFile = path.join(userDirectories.backups, `${getFilePrefix(handle)}${generateTimestamp()}.json`);
     const sourceFile = path.join(userDirectories.root, SETTINGS_FILE);
+
+    if (preventDuplicates && isDuplicateBackup(handle, sourceFile)) {
+        return;
+    }
 
     if (!fs.existsSync(sourceFile)) {
         return;
     }
 
     fs.copyFileSync(sourceFile, backupFile);
-    removeOldBackups(`settings_${handle}`);
+    removeOldBackups(userDirectories.backups, `settings_${handle}`);
+}
+
+/**
+ * Checks if the backup would be a duplicate.
+ * @param {string} handle User handle
+ * @param {string} sourceFile Source file path
+ * @returns {boolean} True if the backup is a duplicate
+ */
+function isDuplicateBackup(handle, sourceFile) {
+    const latestBackup = getLatestBackup(handle);
+    if (!latestBackup) {
+        return false;
+    }
+    return areFilesEqual(latestBackup, sourceFile);
+}
+
+/**
+ * Returns true if the two files are equal.
+ * @param {string} file1 File path
+ * @param {string} file2 File path
+ */
+function areFilesEqual(file1, file2) {
+    if (!fs.existsSync(file1) || !fs.existsSync(file2)) {
+        return false;
+    }
+
+    const content1 = fs.readFileSync(file1);
+    const content2 = fs.readFileSync(file2);
+    return content1.toString() === content2.toString();
+}
+
+/**
+ * Gets the latest backup file for a user.
+ * @param {string} handle User handle
+ * @returns {string|null} Latest backup file. Null if no backup exists.
+ */
+function getLatestBackup(handle) {
+    const userDirectories = getUserDirectories(handle);
+    const backupFiles = fs.readdirSync(userDirectories.backups)
+        .filter(x => x.startsWith(getFilePrefix(handle)))
+        .map(x => ({ name: x, ctime: fs.statSync(path.join(userDirectories.backups, x)).ctimeMs }));
+    const latestBackup = backupFiles.sort((a, b) => b.ctime - a.ctime)[0]?.name;
+    if (!latestBackup) {
+        return null;
+    }
+    return path.join(userDirectories.backups, latestBackup);
 }
 
 const router = express.Router();
@@ -227,12 +274,12 @@ router.post('/get', jsonParser, (request, response) => {
 
 router.post('/get-snapshots', jsonParser, async (request, response) => {
     try {
-        const snapshots = fs.readdirSync(PUBLIC_DIRECTORIES.backups);
+        const snapshots = fs.readdirSync(request.user.directories.backups);
         const userFilesPattern = getFilePrefix(request.user.profile.handle);
         const userSnapshots = snapshots.filter(x => x.startsWith(userFilesPattern));
 
         const result = userSnapshots.map(x => {
-            const stat = fs.statSync(path.join(PUBLIC_DIRECTORIES.backups, x));
+            const stat = fs.statSync(path.join(request.user.directories.backups, x));
             return { date: stat.ctimeMs, name: x, size: stat.size };
         });
 
@@ -252,7 +299,7 @@ router.post('/load-snapshot', jsonParser, async (request, response) => {
         }
 
         const snapshotName = request.body.name;
-        const snapshotPath = path.join(PUBLIC_DIRECTORIES.backups, snapshotName);
+        const snapshotPath = path.join(request.user.directories.backups, snapshotName);
 
         if (!fs.existsSync(snapshotPath)) {
             return response.sendStatus(404);
@@ -269,7 +316,7 @@ router.post('/load-snapshot', jsonParser, async (request, response) => {
 
 router.post('/make-snapshot', jsonParser, async (request, response) => {
     try {
-        backupUserSettings(request.user.profile.handle);
+        backupUserSettings(request.user.profile.handle, false);
         response.sendStatus(204);
     } catch (error) {
         console.log(error);
@@ -286,7 +333,7 @@ router.post('/restore-snapshot', jsonParser, async (request, response) => {
         }
 
         const snapshotName = request.body.name;
-        const snapshotPath = path.join(PUBLIC_DIRECTORIES.backups, snapshotName);
+        const snapshotPath = path.join(request.user.directories.backups, snapshotName);
 
         if (!fs.existsSync(snapshotPath)) {
             return response.sendStatus(404);

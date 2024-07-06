@@ -38,9 +38,24 @@ export const textgen_types = {
     INFERMATICAI: 'infermaticai',
     DREAMGEN: 'dreamgen',
     OPENROUTER: 'openrouter',
+    HUGGINGFACE: 'huggingface',
 };
 
-const { MANCER, VLLM, APHRODITE, TABBY, TOGETHERAI, OOBA, OLLAMA, LLAMACPP, INFERMATICAI, DREAMGEN, OPENROUTER, KOBOLDCPP } = textgen_types;
+const {
+    MANCER,
+    VLLM,
+    APHRODITE,
+    TABBY,
+    TOGETHERAI,
+    OOBA,
+    OLLAMA,
+    LLAMACPP,
+    INFERMATICAI,
+    DREAMGEN,
+    OPENROUTER,
+    KOBOLDCPP,
+    HUGGINGFACE,
+} = textgen_types;
 
 const LLAMACPP_DEFAULT_ORDER = [
     'top_k',
@@ -84,6 +99,7 @@ const SERVER_INPUTS = {
     [textgen_types.KOBOLDCPP]: '#koboldcpp_api_url_text',
     [textgen_types.LLAMACPP]: '#llamacpp_api_url_text',
     [textgen_types.OLLAMA]: '#ollama_api_url_text',
+    [textgen_types.HUGGINGFACE]: '#huggingface_api_url_text',
 };
 
 const KOBOLDCPP_ORDER = [6, 0, 1, 3, 4, 2, 5];
@@ -100,6 +116,8 @@ const settings = {
     min_p: 0,
     rep_pen: 1.2,
     rep_pen_range: 0,
+    rep_pen_decay: 0,
+    rep_pen_slope: 1,
     no_repeat_ngram_size: 0,
     penalty_alpha: 0,
     num_beams: 1,
@@ -108,6 +126,7 @@ const settings = {
     encoder_rep_pen: 1,
     freq_pen: 0,
     presence_pen: 0,
+    skew: 0,
     do_sample: true,
     early_stopping: false,
     dynatemp: false,
@@ -116,6 +135,11 @@ const settings = {
     dynatemp_exponent: 1.0,
     smoothing_factor: 0.0,
     smoothing_curve: 1.0,
+    dry_allowed_length: 2,
+    dry_multiplier: 0.0,
+    dry_base: 1.75,
+    dry_sequence_breakers: '["\\n", ":", "\\"", "*"]',
+    dry_penalty_last_n: 0,
     max_tokens_second: 0,
     seed: -1,
     preset: 'Default',
@@ -139,6 +163,7 @@ const settings = {
     //best_of_aphrodite: 1,
     ignore_eos_token: false,
     spaces_between_special_tokens: true,
+    speculative_ngram: false,
     //logits_processors_aphrodite: [],
     //log_probs_aphrodite: 0,
     //prompt_log_probs_aphrodite: 0,
@@ -171,6 +196,8 @@ export const setting_names = [
     'temperature_last',
     'rep_pen',
     'rep_pen_range',
+    'rep_pen_decay',
+    'rep_pen_slope',
     'no_repeat_ngram_size',
     'top_k',
     'top_p',
@@ -190,10 +217,16 @@ export const setting_names = [
     'dynatemp_exponent',
     'smoothing_factor',
     'smoothing_curve',
+    'dry_allowed_length',
+    'dry_multiplier',
+    'dry_base',
+    'dry_sequence_breakers',
+    'dry_penalty_last_n',
     'max_tokens_second',
     'encoder_rep_pen',
     'freq_pen',
     'presence_pen',
+    'skew',
     'do_sample',
     'early_stopping',
     'seed',
@@ -214,6 +247,7 @@ export const setting_names = [
     //'best_of_aphrodite',
     'ignore_eos_token',
     'spaces_between_special_tokens',
+    'speculative_ngram',
     //'logits_processors_aphrodite',
     //'log_probs_aphrodite',
     //'prompt_log_probs_aphrodite'
@@ -225,6 +259,8 @@ export const setting_names = [
     'custom_model',
     'bypass_status_check',
 ];
+
+const DYNATEMP_BLOCK = document.getElementById('dynatemp_block_ooba');
 
 export function validateTextGenUrl() {
     const selector = SERVER_INPUTS[settings.type];
@@ -638,6 +674,7 @@ jQuery(function () {
             'min_p_textgenerationwebui': 0,
             'rep_pen_textgenerationwebui': 1,
             'rep_pen_range_textgenerationwebui': 0,
+            'rep_pen_decay_textgenerationwebui': 0,
             'dynatemp_textgenerationwebui': false,
             'seed_textgenerationwebui': -1,
             'ban_eos_token_textgenerationwebui': false,
@@ -656,7 +693,9 @@ jQuery(function () {
             'encoder_rep_pen_textgenerationwebui': 1,
             'freq_pen_textgenerationwebui': 0,
             'presence_pen_textgenerationwebui': 0,
+            'skew_textgenerationwebui': 0,
             'no_repeat_ngram_size_textgenerationwebui': 0,
+            'speculative_ngram_textgenerationwebui': false,
             'min_length_textgenerationwebui': 0,
             'num_beams_textgenerationwebui': 1,
             'length_penalty_textgenerationwebui': 1,
@@ -665,6 +704,10 @@ jQuery(function () {
             'guidance_scale_textgenerationwebui': 1,
             'smoothing_factor_textgenerationwebui': 0,
             'smoothing_curve_textgenerationwebui': 1,
+            'dry_allowed_length_textgenerationwebui': 2,
+            'dry_multiplier_textgenerationwebui': 0,
+            'dry_base_textgenerationwebui': 1.75,
+            'dry_penalty_last_n_textgenerationwebui': 0,
         };
 
         for (const [id, value] of Object.entries(inputs)) {
@@ -836,7 +879,7 @@ async function generateTextGenWithStreaming(generate_data, signal) {
 
     return async function* streamData() {
         let text = '';
-        /** @type {import('logprobs.js').TokenLogprobs | null} */
+        /** @type {import('./logprobs.js').TokenLogprobs | null} */
         let logprobs = null;
         const swipes = [];
         while (true) {
@@ -868,7 +911,7 @@ async function generateTextGenWithStreaming(generate_data, signal) {
  * Probabilities feature.
  * @param {string} token - the text of the token that the logprobs are for
  * @param {Object} logprobs - logprobs object returned from the API
- * @returns {import('logprobs.js').TokenLogprobs | null} - converted logprobs
+ * @returns {import('./logprobs.js').TokenLogprobs | null} - converted logprobs
  */
 export function parseTextgenLogprobs(token, logprobs) {
     if (!logprobs) {
@@ -880,6 +923,7 @@ export function parseTextgenLogprobs(token, logprobs) {
         case VLLM:
         case APHRODITE:
         case MANCER:
+        case INFERMATICAI:
         case OOBA: {
             /** @type {Record<string, number>[]} */
             const topLogprobs = logprobs.top_logprobs;
@@ -983,6 +1027,8 @@ export function getTextGenModel() {
                 throw new Error('No Ollama model selected');
             }
             return settings.ollama_model;
+        case HUGGINGFACE:
+            return 'tgi';
         default:
             return undefined;
     }
@@ -994,8 +1040,21 @@ export function isJsonSchemaSupported() {
     return [TABBY, LLAMACPP].includes(settings.type) && main_api === 'textgenerationwebui';
 }
 
+function isDynamicTemperatureSupported() {
+    return settings.dynatemp && DYNATEMP_BLOCK?.dataset?.tgType?.includes(settings.type);
+}
+
+function getLogprobsNumber() {
+    if (settings.type === VLLM || settings.type === INFERMATICAI) {
+        return 5;
+    }
+
+    return 10;
+}
+
 export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, isContinue, cfgValues, type) {
     const canMultiSwipe = !isContinue && !isImpersonate && type !== 'quiet';
+    const dynatemp = isDynamicTemperatureSupported();
     const { banned_tokens, banned_strings } = getCustomTokenBans();
 
     let params = {
@@ -1003,8 +1062,8 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
         'model': getTextGenModel(),
         'max_new_tokens': maxTokens,
         'max_tokens': maxTokens,
-        'logprobs': power_user.request_token_probabilities ? 10 : undefined,
-        'temperature': settings.dynatemp ? (settings.min_temp + settings.max_temp) / 2 : settings.temp,
+        'logprobs': power_user.request_token_probabilities ? getLogprobsNumber() : undefined,
+        'temperature': dynatemp ? (settings.min_temp + settings.max_temp) / 2 : settings.temp,
         'top_p': settings.top_p,
         'typical_p': settings.typical_p,
         'typical': settings.typical_p,
@@ -1014,6 +1073,7 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
         'frequency_penalty': settings.freq_pen,
         'presence_penalty': settings.presence_pen,
         'top_k': settings.top_k,
+        'skew': settings.skew,
         'min_length': settings.type === OOBA ? settings.min_length : undefined,
         'minimum_message_content_tokens': settings.type === DREAMGEN ? settings.min_length : undefined,
         'min_tokens': settings.min_length,
@@ -1021,13 +1081,18 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
         'length_penalty': settings.length_penalty,
         'early_stopping': settings.early_stopping,
         'add_bos_token': settings.add_bos_token,
-        'dynamic_temperature': settings.dynatemp ? true : undefined,
-        'dynatemp_low': settings.dynatemp ? settings.min_temp : undefined,
-        'dynatemp_high': settings.dynatemp ? settings.max_temp : undefined,
-        'dynatemp_range': settings.dynatemp ? (settings.max_temp - settings.min_temp) / 2 : undefined,
-        'dynatemp_exponent': settings.dynatemp ? settings.dynatemp_exponent : undefined,
+        'dynamic_temperature': dynatemp ? true : undefined,
+        'dynatemp_low': dynatemp ? settings.min_temp : undefined,
+        'dynatemp_high': dynatemp ? settings.max_temp : undefined,
+        'dynatemp_range': dynatemp ? (settings.max_temp - settings.min_temp) / 2 : undefined,
+        'dynatemp_exponent': dynatemp ? settings.dynatemp_exponent : undefined,
         'smoothing_factor': settings.smoothing_factor,
         'smoothing_curve': settings.smoothing_curve,
+        'dry_allowed_length': settings.dry_allowed_length,
+        'dry_multiplier': settings.dry_multiplier,
+        'dry_base': settings.dry_base,
+        'dry_sequence_breakers': settings.dry_sequence_breakers,
+        'dry_penalty_last_n': settings.dry_penalty_last_n,
         'max_tokens_second': settings.max_tokens_second,
         'sampler_priority': settings.type === OOBA ? settings.sampler_priority : undefined,
         'samplers': settings.type === LLAMACPP ? settings.samplers : undefined,
@@ -1055,11 +1120,13 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
     const nonAphroditeParams = {
         'rep_pen': settings.rep_pen,
         'rep_pen_range': settings.rep_pen_range,
+        'repetition_decay': settings.type === TABBY ? settings.rep_pen_decay : undefined,
         'repetition_penalty_range': settings.rep_pen_range,
         'encoder_repetition_penalty': settings.type === OOBA ? settings.encoder_rep_pen : undefined,
         'no_repeat_ngram_size': settings.type === OOBA ? settings.no_repeat_ngram_size : undefined,
         'penalty_alpha': settings.type === OOBA ? settings.penalty_alpha : undefined,
         'temperature_last': (settings.type === OOBA || settings.type === APHRODITE || settings.type == TABBY) ? settings.temperature_last : undefined,
+        'speculative_ngram': settings.type === TABBY ? settings.speculative_ngram : undefined,
         'do_sample': settings.type === OOBA ? settings.do_sample : undefined,
         'seed': settings.seed,
         'guidance_scale': cfgValues?.guidanceScale?.value ?? settings.guidance_scale ?? 1,
@@ -1071,16 +1138,19 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
         'tfs_z': settings.tfs,
         'repeat_last_n': settings.rep_pen_range,
         'n_predict': maxTokens,
+        'num_predict': maxTokens,
+        'num_ctx': max_context,
         'mirostat': settings.mirostat_mode,
         'ignore_eos': settings.ban_eos_token,
         'n_probs': power_user.request_token_probabilities ? 10 : undefined,
+        'rep_pen_slope': settings.rep_pen_slope,
     };
     const vllmParams = {
         'n': canMultiSwipe ? settings.n : 1,
         'best_of': canMultiSwipe ? settings.n : 1,
         'ignore_eos': settings.ignore_eos_token,
         'spaces_between_special_tokens': settings.spaces_between_special_tokens,
-        'seed': settings.seed,
+        'seed': settings.seed >= 0 ? settings.seed : undefined,
     };
     const aphroditeParams = {
         'n': canMultiSwipe ? settings.n : 1,
@@ -1101,6 +1171,12 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
         params.grammar = settings.grammar_string;
     }
 
+    if (settings.type === HUGGINGFACE) {
+        params.top_p = Math.min(Math.max(Number(params.top_p), 0.0), 0.999);
+        params.stop = Array.isArray(params.stop) ? params.stop.slice(0, 4) : [];
+        nonAphroditeParams.seed = settings.seed >= 0 ? settings.seed : undefined;
+    }
+
     if (settings.type === MANCER) {
         params.n = canMultiSwipe ? settings.n : 1;
         params.epsilon_cutoff /= 1000;
@@ -1112,8 +1188,13 @@ export function getTextGenGenerationData(finalPrompt, maxTokens, isImpersonate, 
         delete params.dynatemp_high;
     }
 
+    if (settings.type === TABBY) {
+        params.n = canMultiSwipe ? settings.n : 1;
+    }
+
     switch (settings.type) {
         case VLLM:
+        case INFERMATICAI:
             params = Object.assign(params, vllmParams);
             break;
 

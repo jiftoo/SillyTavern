@@ -2,7 +2,6 @@ import {
     saveSettingsDebounced,
     scrollChatToBottom,
     characters,
-    callPopup,
     reloadMarkdownProcessor,
     reloadCurrentChat,
     getRequestHeaders,
@@ -23,6 +22,7 @@ import {
     setActiveGroup,
     setActiveCharacter,
     entitiesFilter,
+    doNewChat,
 } from '../script.js';
 import { isMobile, initMovingUI, favsToHotswap } from './RossAscends-mods.js';
 import {
@@ -35,17 +35,20 @@ import {
     selectInstructPreset,
 } from './instruct-mode.js';
 
-import { getTagsList, tag_map, tags } from './tags.js';
+import { getTagsList, tag_import_setting, tag_map, tags } from './tags.js';
 import { tokenizers } from './tokenizers.js';
 import { BIAS_CACHE } from './logit-bias.js';
 import { renderTemplateAsync } from './templates.js';
 
-import { countOccurrences, debounce, delay, download, getFileText, isOdd, onlyUnique, resetScrollHeight, shuffle, sortMoments, stringToRange, timestampToMoment } from './utils.js';
+import { countOccurrences, debounce, delay, download, getFileText, isOdd, isTrueBoolean, onlyUnique, resetScrollHeight, shuffle, sortMoments, stringToRange, timestampToMoment } from './utils.js';
 import { FILTER_TYPES } from './filters.js';
 import { PARSER_FLAG, SlashCommandParser } from './slash-commands/SlashCommandParser.js';
 import { SlashCommand } from './slash-commands/SlashCommand.js';
-import { ARGUMENT_TYPE, SlashCommandArgument } from './slash-commands/SlashCommandArgument.js';
+import { ARGUMENT_TYPE, SlashCommandArgument, SlashCommandNamedArgument } from './slash-commands/SlashCommandArgument.js';
 import { AUTOCOMPLETE_WIDTH } from './autocomplete/AutoComplete.js';
+import { SlashCommandEnumValue, enumTypes } from './slash-commands/SlashCommandEnumValue.js';
+import { commonEnumProviders, enumIcons } from './slash-commands/SlashCommandCommonEnumsProvider.js';
+import { POPUP_TYPE, callGenericPopup } from './popup.js';
 
 export {
     loadPowerUserSettings,
@@ -102,6 +105,7 @@ export const persona_description_positions = {
     AFTER_CHAR: 1,
     TOP_AN: 2,
     BOTTOM_AN: 3,
+    AT_DEPTH: 4,
 };
 
 let power_user = {
@@ -199,6 +203,7 @@ let power_user = {
     trim_spaces: true,
     relaxed_api_urls: false,
     world_import_dialog: true,
+    tag_import_setting: tag_import_setting.ASK,
     disable_group_trimming: false,
     single_line: false,
 
@@ -247,6 +252,8 @@ let power_user = {
 
     persona_description: '',
     persona_description_position: persona_description_positions.IN_PROMPT,
+    persona_description_role: 0,
+    persona_description_depth: 2,
     persona_show_notifications: true,
     persona_sort_order: 'asc',
 
@@ -681,6 +688,9 @@ async function CreateZenSliders(elmnt) {
         sliderID == 'top_k' ||
         sliderID == 'mirostat_mode_kobold' ||
         sliderID == 'rep_pen_range' ||
+        sliderID == 'dry_allowed_length_textgenerationwebui' ||
+        sliderID == 'rep_pen_decay_textgenerationwebui' ||
+        sliderID == 'dry_penalty_last_n_textgenerationwebui' ||
         sliderID == 'max_tokens_second_textgenerationwebui') {
         decimals = 0;
     }
@@ -688,7 +698,9 @@ async function CreateZenSliders(elmnt) {
         sliderID == 'max_temp_textgenerationwebui' ||
         sliderID == 'dynatemp_exponent_textgenerationwebui' ||
         sliderID == 'smoothing_curve_textgenerationwebui' ||
-        sliderID == 'smoothing_factor_textgenerationwebui') {
+        sliderID == 'smoothing_factor_textgenerationwebui' ||
+        sliderID == 'dry_multiplier_textgenerationwebui' ||
+        sliderID == 'dry_base_textgenerationwebui') {
         decimals = 2;
     }
     if (sliderID == 'eta_cutoff_textgenerationwebui' ||
@@ -749,6 +761,7 @@ async function CreateZenSliders(elmnt) {
         sliderID == 'rep_pen_slope' ||
         sliderID == 'smoothing_factor_textgenerationwebui' ||
         sliderID == 'smoothing_curve_textgenerationwebui' ||
+        sliderID == 'dry_multiplier_textgenerationwebui' ||
         sliderID == 'min_length_textgenerationwebui') {
         offVal = 0;
     }
@@ -767,6 +780,7 @@ async function CreateZenSliders(elmnt) {
         sliderID == 'max_temp_textgenerationwebui' ||
         sliderID == 'dynatemp_exponent_textgenerationwebui' ||
         sliderID == 'guidance_scale_textgenerationwebui' ||
+        sliderID == 'rep_pen_slope_textgenerationwebui' ||
         sliderID == 'guidance_scale') {
         offVal = 1;
     }
@@ -970,6 +984,7 @@ function switchUiMode() {
 
 function toggleWaifu() {
     $('#waifuMode').trigger('click');
+    return '';
 }
 
 function switchWaifuMode() {
@@ -1425,7 +1440,7 @@ async function applyTheme(name) {
 }
 
 async function applyMovingUIPreset(name) {
-    resetMovablePanels('quiet');
+    await resetMovablePanels('quiet');
     const movingUIPreset = movingUIPresets.find(x => x.name == name);
 
     if (!movingUIPreset) {
@@ -1437,6 +1452,7 @@ async function applyMovingUIPreset(name) {
 
     console.log('MovingUI Preset applied: ' + name);
     loadMovingUIState();
+    saveSettingsDebounced();
 }
 
 /**
@@ -1452,7 +1468,7 @@ export function registerDebugFunction(functionId, name, description, func) {
 
 async function showDebugMenu() {
     const template = await renderTemplateAsync('debug', { functions: debug_functions });
-    callPopup(template, 'text', '', { wide: true, large: true });
+    callGenericPopup(template, POPUP_TYPE.TEXT, '', { wide: true, large: true, allowVerticalScrolling: true });
 }
 
 switchUiMode();
@@ -1506,12 +1522,18 @@ function loadPowerUserSettings(settings, data) {
             if (power_user.stscript.autocomplete.font === undefined) {
                 power_user.stscript.autocomplete.font = defaultStscript.autocomplete.font;
             }
+            if (power_user.stscript.autocomplete.style === undefined) {
+                power_user.stscript.autocomplete.style = power_user.stscript.autocomplete_style || defaultStscript.autocomplete.style;
+            }
         }
         if (power_user.stscript.parser === undefined) {
             power_user.stscript.parser = defaultStscript.parser;
         } else if (power_user.stscript.parser.flags === undefined) {
             power_user.stscript.parser.flags = defaultStscript.parser.flags;
         }
+
+        // Cleanup old flags
+        delete power_user.stscript.autocomplete_style;
     }
 
     if (data.themes !== undefined) {
@@ -1585,6 +1607,12 @@ function loadPowerUserSettings(settings, data) {
         power_user.tokenizer = tokenizers.GPT2;
     }
 
+    // Clean up old/legacy settings
+    if (power_user.import_card_tags !== undefined) {
+        power_user.tag_import_setting = power_user.import_card_tags ? tag_import_setting.ASK : tag_import_setting.NONE;
+        delete power_user.import_card_tags;
+    }
+
     $('#single_line').prop('checked', power_user.single_line);
     $('#relaxed_api_urls').prop('checked', power_user.relaxed_api_urls);
     $('#world_import_dialog').prop('checked', power_user.world_import_dialog);
@@ -1613,7 +1641,6 @@ function loadPowerUserSettings(settings, data) {
     $('#zoomed_avatar_magnification').prop('checked', power_user.zoomed_avatar_magnification);
     $(`#tokenizer option[value="${power_user.tokenizer}"]`).attr('selected', true);
     $(`#send_on_enter option[value=${power_user.send_on_enter}]`).attr('selected', true);
-    $('#import_card_tags').prop('checked', power_user.import_card_tags);
     $('#confirm_message_delete').prop('checked', power_user.confirm_message_delete !== undefined ? !!power_user.confirm_message_delete : true);
     $('#spoiler_free_mode').prop('checked', power_user.spoiler_free_mode);
     $('#collapse-newlines-checkbox').prop('checked', power_user.collapse_newlines);
@@ -1656,20 +1683,21 @@ function loadPowerUserSettings(settings, data) {
     $('#chat_width_slider').val(power_user.chat_width);
     $('#token_padding').val(power_user.token_padding);
     $('#aux_field').val(power_user.aux_field);
+    $('#tag_import_setting').val(power_user.tag_import_setting);
 
     $('#stscript_autocomplete_autoHide').prop('checked', power_user.stscript.autocomplete.autoHide ?? false).trigger('input');
     $('#stscript_matching').val(power_user.stscript.matching ?? 'fuzzy');
-    $('#stscript_autocomplete_style').val(power_user.stscript.autocomplete_style ?? 'theme');
-    document.body.setAttribute('data-stscript-style', power_user.stscript.autocomplete_style);
+    $('#stscript_autocomplete_style').val(power_user.stscript.autocomplete.style ?? 'theme');
+    document.body.setAttribute('data-stscript-style', power_user.stscript.autocomplete.style);
     $('#stscript_parser_flag_strict_escaping').prop('checked', power_user.stscript.parser.flags[PARSER_FLAG.STRICT_ESCAPING] ?? false);
     $('#stscript_parser_flag_replace_getvar').prop('checked', power_user.stscript.parser.flags[PARSER_FLAG.REPLACE_GETVAR] ?? false);
     $('#stscript_autocomplete_font_scale').val(power_user.stscript.autocomplete.font.scale ?? defaultStscript.autocomplete.font.scale);
     $('#stscript_autocomplete_font_scale_counter').val(power_user.stscript.autocomplete.font.scale ?? defaultStscript.autocomplete.font.scale);
     document.body.style.setProperty('--ac-font-scale', power_user.stscript.autocomplete.font.scale ?? defaultStscript.autocomplete.font.scale.toString());
     $('#stscript_autocomplete_width_left').val(power_user.stscript.autocomplete.width.left ?? AUTOCOMPLETE_WIDTH.CHAT);
-    document.querySelector('#stscript_autocomplete_width_left').dispatchEvent(new Event('input', { bubbles:true }));
+    document.querySelector('#stscript_autocomplete_width_left').dispatchEvent(new Event('input', { bubbles: true }));
     $('#stscript_autocomplete_width_right').val(power_user.stscript.autocomplete.width.right ?? AUTOCOMPLETE_WIDTH.CHAT);
-    document.querySelector('#stscript_autocomplete_width_right').dispatchEvent(new Event('input', { bubbles:true }));
+    document.querySelector('#stscript_autocomplete_width_right').dispatchEvent(new Event('input', { bubbles: true }));
 
     $('#restore_user_input').prop('checked', power_user.restore_user_input);
 
@@ -1788,11 +1816,24 @@ function loadMaxContextUnlocked() {
 }
 
 function switchMaxContextSize() {
-    const elements = [$('#max_context'), $('#max_context_counter'), $('#rep_pen_range'), $('#rep_pen_range_counter'), $('#rep_pen_range_textgenerationwebui'), $('#rep_pen_range_counter_textgenerationwebui')];
+    const elements = [
+        $('#max_context'),
+        $('#max_context_counter'),
+        $('#rep_pen_range'),
+        $('#rep_pen_range_counter'),
+        $('#rep_pen_range_textgenerationwebui'),
+        $('#rep_pen_range_counter_textgenerationwebui'),
+        $('#dry_penalty_last_n_textgenerationwebui'),
+        $('#dry_penalty_last_n_counter_textgenerationwebui'),
+        $('#rep_pen_decay_textgenerationwebui'),
+        $('#rep_pen_decay_counter_textgenerationwebui'),
+    ];
     const maxValue = power_user.max_context_unlocked ? MAX_CONTEXT_UNLOCKED : MAX_CONTEXT_DEFAULT;
     const minValue = power_user.max_context_unlocked ? maxContextMin : maxContextMin;
     const steps = power_user.max_context_unlocked ? unlockedMaxContextStep : maxContextStep;
     $('#rep_pen_range_textgenerationwebui_zenslider').remove(); //unsure why, but this is necessary.
+    $('#dry_penalty_last_n_textgenerationwebui_zenslider').remove();
+    $('#rep_pen_decay_textgenerationwebui_zenslider').remove();
     for (const element of elements) {
         const id = element.attr('id');
         element.attr('max', maxValue);
@@ -1821,6 +1862,10 @@ function switchMaxContextSize() {
         CreateZenSliders($('#max_context'));
         $('#rep_pen_range_textgenerationwebui_zenslider').remove();
         CreateZenSliders($('#rep_pen_range_textgenerationwebui'));
+        $('#dry_penalty_last_n_textgenerationwebui_zenslider').remove();
+        CreateZenSliders($('#dry_penalty_last_n_textgenerationwebui'));
+        $('#rep_pen_decay_textgenerationwebui_zenslider').remove();
+        CreateZenSliders($('#rep_pen_decay_textgenerationwebui'));
     }
 }
 
@@ -2200,7 +2245,8 @@ async function deleteTheme() {
         return;
     }
 
-    const confirm = await callPopup(`Are you sure you want to delete the theme "${themeName}"?`, 'confirm', '', { okButton: 'Yes' });
+    const template = $(await renderTemplateAsync('themeDelete', { themeName }));
+    const confirm = await callGenericPopup(template, POPUP_TYPE.CONFIRM);
 
     if (!confirm) {
         return;
@@ -2262,38 +2308,85 @@ async function importTheme(file) {
     }
 
     if (typeof parsed.custom_css === 'string' && parsed.custom_css.includes('@import')) {
-        const confirm = await callPopup('This theme contains @import lines in the Custom CSS. Press "Yes" to proceed.', 'confirm', '', { okButton: 'Yes' });
+        const template = $(await renderTemplateAsync('themeImportWarning'));
+        const confirm = await callGenericPopup(template, POPUP_TYPE.CONFIRM);
         if (!confirm) {
             throw new Error('Theme contains @import lines');
         }
     }
 
     themes.push(parsed);
-    await applyTheme(parsed.name);
-    await saveTheme(parsed.name);
+    await saveTheme(parsed.name, getNewTheme(parsed));
     const option = document.createElement('option');
-    option.selected = true;
+    option.selected = false;
     option.value = parsed.name;
     option.innerText = parsed.name;
     $('#themes').append(option);
     saveSettingsDebounced();
+    toastr.success(parsed.name, 'Theme imported');
 }
 
 /**
  * Saves the current theme to the server.
  * @param {string|undefined} name Theme name. If undefined, a popup will be shown to enter a name.
+ * @param {object|undefined} theme Theme object. If undefined, the current theme will be saved.
  * @returns {Promise<object>} A promise that resolves when the theme is saved.
  */
-async function saveTheme(name = undefined) {
+async function saveTheme(name = undefined, theme = undefined) {
     if (typeof name !== 'string') {
-        name = await callPopup('Enter a theme preset name:', 'input', power_user.theme);
+        const newName = await callGenericPopup('Enter a theme preset name:', POPUP_TYPE.INPUT, power_user.theme);
 
-        if (!name) {
+        if (!newName) {
             return;
         }
+
+        name = String(newName);
     }
 
-    const theme = {
+    if (typeof theme !== 'object') {
+        theme = getThemeObject(name);
+    }
+
+    const response = await fetch('/api/themes/save', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify(theme),
+    });
+
+    if (!response.ok) {
+        toastr.error('Check the server connection and reload the page to prevent data loss.', 'Theme could not be saved');
+        console.error('Theme could not be saved', response);
+        throw new Error('Theme could not be saved');
+    }
+
+    const themeIndex = themes.findIndex(x => x.name == name);
+
+    if (themeIndex == -1) {
+        themes.push(theme);
+        const option = document.createElement('option');
+        option.selected = true;
+        option.value = name;
+        option.innerText = name;
+        $('#themes').append(option);
+    }
+    else {
+        themes[themeIndex] = theme;
+        $(`#themes option[value="${name}"]`).attr('selected', true);
+    }
+
+    power_user.theme = name;
+    saveSettingsDebounced();
+
+    return theme;
+}
+
+/**
+ * Gets a snapshot of the current theme settings.
+ * @param {string} name Name of the theme
+ * @returns {object} Theme object
+ */
+function getThemeObject(name) {
+    return {
         name,
         blur_strength: power_user.blur_strength,
         main_text_color: power_user.main_text_color,
@@ -2332,42 +2425,31 @@ async function saveTheme(name = undefined) {
         reduced_motion: power_user.reduced_motion,
         compact_input_area: power_user.compact_input_area,
     };
+}
 
-    const response = await fetch('/api/themes/save', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify(theme),
-    });
-
-    if (response.ok) {
-        const themeIndex = themes.findIndex(x => x.name == name);
-
-        if (themeIndex == -1) {
-            themes.push(theme);
-            const option = document.createElement('option');
-            option.selected = true;
-            option.value = name;
-            option.innerText = name;
-            $('#themes').append(option);
+/**
+ * Applies imported theme properties to the theme object.
+ * @param {object} parsed Parsed object to get the theme from.
+ * @returns {object} Theme assigned to the parsed object.
+ */
+function getNewTheme(parsed) {
+    const theme = getThemeObject(parsed.name);
+    for (const key in parsed) {
+        if (Object.hasOwn(theme, key)) {
+            theme[key] = parsed[key];
         }
-        else {
-            themes[themeIndex] = theme;
-            $(`#themes option[value="${name}"]`).attr('selected', true);
-        }
-
-        power_user.theme = name;
-        saveSettingsDebounced();
     }
-
     return theme;
 }
 
 async function saveMovingUI() {
-    const name = await callPopup('Enter a name for the MovingUI Preset:', 'input');
+    const popupResult = await callGenericPopup('Enter a name for the MovingUI Preset:', POPUP_TYPE.INPUT);
 
-    if (!name) {
+    if (!popupResult) {
         return;
     }
+
+    const name = String(popupResult);
 
     const movingUIPreset = {
         name,
@@ -2400,7 +2482,8 @@ async function saveMovingUI() {
         power_user.movingUIPreset = name;
         saveSettingsDebounced();
     } else {
-        toastr.warning('failed to save MovingUI state.');
+        toastr.error('Failed to save MovingUI state.');
+        console.error('MovingUI could not be saved', response);
     }
 }
 
@@ -2491,16 +2574,6 @@ async function resetMovablePanels(type) {
             toastr.success('Panel positions reset');
         }
     });
-}
-
-function doNewChat() {
-    setTimeout(() => {
-        $('#option_start_new_chat').trigger('click');
-    }, 1);
-    //$("#dialogue_popup").hide();
-    setTimeout(() => {
-        $('#dialogue_popup_ok').trigger('click');
-    }, 1);
 }
 
 /**
@@ -2637,16 +2710,14 @@ async function doMesCut(_, text) {
 }
 
 async function doDelMode(_, text) {
-    //first enter delmode
-    $('#option_delete_mes').trigger('click', { fromSlashCommand: true });
-
     //reject invalid args
     if (text && isNaN(text)) {
         toastr.warning('Must enter a number or nothing.');
-        await delay(300); //unsure why 300 is neccessary here, but any shorter and it wont see the delmode UI
-        $('#dialogue_del_mes_cancel').trigger('click');
-        return;
+        return '';
     }
+
+    //first enter delmode
+    $('#option_delete_mes').trigger('click', { fromSlashCommand: true });
 
     //parse valid args
     if (text) {
@@ -2658,16 +2729,16 @@ async function doDelMode(_, text) {
 
         if (oldestMesIDToDel < 0) {
             toastr.warning(`Cannot delete more than ${chat.length} messages.`);
-            return;
+            return '';
         }
 
         let oldestMesToDel = $('#chat').find(`.mes[mesid=${oldestMesIDToDel}]`);
 
-        if (!oldestMesIDToDel) {
+        if (!oldestMesIDToDel && lastMesID > 0) {
             oldestMesToDel = await loadUntilMesId(oldestMesIDToDel);
 
             if (!oldestMesToDel || !oldestMesToDel.length) {
-                return;
+                return '';
             }
         }
 
@@ -2680,12 +2751,15 @@ async function doDelMode(_, text) {
         //await delay(1)
         $('#dialogue_del_mes_ok').trigger('click');
         toastr.success(`Deleted ${trueNumberOfDeletedMessage} messages.`);
-        return;
+        return '';
     }
+
+    return '';
 }
 
 function doResetPanels() {
     $('#movingUIreset').trigger('click');
+    return '';
 }
 
 function setAvgBG() {
@@ -2892,7 +2966,7 @@ function setAvgBG() {
         return `rgba(${rNew.toFixed(0)}, ${gNew.toFixed(0)}, ${bNew.toFixed(0)}, 1)`;
     }
 
-
+    return '';
 }
 
 async function setThemeCallback(_, text) {
@@ -2916,6 +2990,7 @@ async function setThemeCallback(_, text) {
     applyTheme(theme.name);
     $('#themes').val(theme.name);
     saveSettingsDebounced();
+    return '';
 }
 
 async function setmovingUIPreset(_, text) {
@@ -2939,6 +3014,7 @@ async function setmovingUIPreset(_, text) {
     applyMovingUIPreset(preset.name);
     $('#movingUIPresets').val(preset.name);
     saveSettingsDebounced();
+    return '';
 }
 
 const EPHEMERAL_STOPPING_STRINGS = [];
@@ -3031,13 +3107,20 @@ $(document).ready(() => {
     });
 
     const reportZoomLevelDebounced = debounce(() => {
-        const zoomLevel = Number(window.devicePixelRatio).toFixed(2);
+        const zoomLevel = Number(window.devicePixelRatio).toFixed(2) || 1;
         const winWidth = window.innerWidth;
         const winHeight = window.innerHeight;
-        console.debug(`Zoom: ${zoomLevel}, X:${winWidth}, Y:${winHeight}`);
+        const originalWidth = winWidth * zoomLevel;
+        const originalHeight = winHeight * zoomLevel;
+        console.debug(`Zoom: ${zoomLevel}, X:${winWidth}, Y:${winHeight}, original: ${originalWidth}x${originalHeight} `);
+        return zoomLevel;
     });
 
+    var coreTruthWinWidth = window.innerWidth;
+    var coreTruthWinHeight = window.innerHeight;
+
     $(window).on('resize', async () => {
+        console.log(`Window resize: ${coreTruthWinWidth}x${coreTruthWinHeight} -> ${window.innerWidth}x${window.innerHeight}`)
         adjustAutocompleteDebounced();
         setHotswapsDebounced();
 
@@ -3047,9 +3130,54 @@ $(document).ready(() => {
 
         reportZoomLevelDebounced();
 
+        //attempt to scale movingUI elements naturally across window resizing/zooms
+        //this will still break if the zoom level causes mobile styles to come into play.
+        const scaleY = Number(window.innerHeight / coreTruthWinHeight).toFixed(4);
+        const scaleX = Number(window.innerWidth / coreTruthWinWidth).toFixed(4);
+
         if (Object.keys(power_user.movingUIState).length > 0) {
-            resetMovablePanels('resize');
+            for (var elmntName of Object.keys(power_user.movingUIState)) {
+                var elmntState = power_user.movingUIState[elmntName];
+                var oldHeight = elmntState.height;
+                var oldWidth = elmntState.width;
+                var oldLeft = elmntState.left;
+                var oldTop = elmntState.top;
+                var oldBottom = elmntState.bottom;
+                var oldRight = elmntState.right;
+                var newHeight, newWidth, newTop, newBottom, newLeft, newRight;
+
+                newHeight = Number(oldHeight * scaleY).toFixed(0);
+                newWidth = Number(oldWidth * scaleX).toFixed(0);
+                newLeft = Number(oldLeft * scaleX).toFixed(0);
+                newTop = Number(oldTop * scaleY).toFixed(0);
+                newBottom = Number(oldBottom * scaleY).toFixed(0);
+                newRight = Number(oldRight * scaleX).toFixed(0);
+                try {
+                    var elmnt = $('#' + $.escapeSelector(elmntName));
+                    if (elmnt.length) {
+                        console.log(`scaling ${elmntName} by ${scaleX}x${scaleY} to ${newWidth}x${newHeight}`);
+                        elmnt.css('height', newHeight);
+                        elmnt.css('width', newWidth);
+                        elmnt.css('inset', `${newTop}px ${newRight}px ${newBottom}px ${newLeft}px`);
+                        power_user.movingUIState[elmntName].height = newHeight;
+                        power_user.movingUIState[elmntName].width = newWidth;
+                        power_user.movingUIState[elmntName].top = newTop;
+                        power_user.movingUIState[elmntName].bottom = newBottom;
+                        power_user.movingUIState[elmntName].left = newLeft;
+                        power_user.movingUIState[elmntName].right = newRight;
+                    } else {
+                        console.log(`skipping ${elmntName} because it doesn't exist in the DOM`);
+                    }
+                } catch (err) {
+                    console.log(`error occurred while processing ${elmntName}: ${err}`);
+                }
+            }
+        } else {
+            console.log('aborting MUI reset', Object.keys(power_user.movingUIState).length)
         }
+        saveSettingsDebounced();
+        coreTruthWinWidth = window.innerWidth;
+        coreTruthWinHeight = window.innerHeight;
     });
 
     // Settings that go to settings.json
@@ -3456,11 +3584,6 @@ $(document).ready(() => {
         saveSettingsDebounced();
     });
 
-    $('#import_card_tags').on('input', function () {
-        power_user.import_card_tags = !!$(this).prop('checked');
-        saveSettingsDebounced();
-    });
-
     $('#confirm_message_delete').on('input', function () {
         power_user.confirm_message_delete = !!$(this).prop('checked');
         saveSettingsDebounced();
@@ -3699,6 +3822,12 @@ $(document).ready(() => {
         saveSettingsDebounced();
     });
 
+    $('#tag_import_setting').on('change', function () {
+        const value = $(this).find(':selected').val();
+        power_user.tag_import_setting = Number(value);
+        saveSettingsDebounced();
+    });
+
     $('#stscript_autocomplete_autoHide').on('input', function () {
         power_user.stscript.autocomplete.autoHide = !!$(this).prop('checked');
         saveSettingsDebounced();
@@ -3712,8 +3841,8 @@ $(document).ready(() => {
 
     $('#stscript_autocomplete_style').on('change', function () {
         const value = $(this).find(':selected').val();
-        power_user.stscript.autocomplete_style = String(value);
-        document.body.setAttribute('data-stscript-style', power_user.stscript.autocomplete_style);
+        power_user.stscript.autocomplete.style = String(value);
+        document.body.setAttribute('data-stscript-style', power_user.stscript.autocomplete.style);
         saveSettingsDebounced();
     });
 
@@ -3722,7 +3851,7 @@ $(document).ready(() => {
         $('#stscript_autocomplete_font_scale_counter').val(value);
         power_user.stscript.autocomplete.font.scale = Number(value);
         document.body.style.setProperty('--ac-font-scale', value.toString());
-        window.dispatchEvent(new Event('resize', { bubbles:true }));
+        window.dispatchEvent(new Event('resize', { bubbles: true }));
         saveSettingsDebounced();
     });
     $('#stscript_autocomplete_font_scale_counter').on('input', function () {
@@ -3730,7 +3859,7 @@ $(document).ready(() => {
         $('#stscript_autocomplete_font_scale').val(value);
         power_user.stscript.autocomplete.font.scale = Number(value);
         document.body.style.setProperty('--ac-font-scale', value.toString());
-        window.dispatchEvent(new Event('resize', { bubbles:true }));
+        window.dispatchEvent(new Event('resize', { bubbles: true }));
         saveSettingsDebounced();
     });
 
@@ -3738,7 +3867,7 @@ $(document).ready(() => {
         const value = $(this).val();
         power_user.stscript.autocomplete.width.left = Number(value);
         /**@type {HTMLElement}*/(this.closest('.doubleRangeInputContainer')).style.setProperty('--value', value.toString());
-        window.dispatchEvent(new Event('resize', { bubbles:true }));
+        window.dispatchEvent(new Event('resize', { bubbles: true }));
         saveSettingsDebounced();
     });
 
@@ -3746,7 +3875,7 @@ $(document).ready(() => {
         const value = $(this).val();
         power_user.stscript.autocomplete.width.right = Number(value);
         /**@type {HTMLElement}*/(this.closest('.doubleRangeInputContainer')).style.setProperty('--value', value.toString());
-        window.dispatchEvent(new Event('resize', { bubbles:true }));
+        window.dispatchEvent(new Event('resize', { bubbles: true }));
         saveSettingsDebounced();
     });
 
@@ -3840,24 +3969,43 @@ $(document).ready(() => {
         browser_has_focus = false;
     });
 
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'vn',
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'vn',
         callback: toggleWaifu,
         helpString: 'Swaps Visual Novel Mode On/Off',
     }));
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'newchat',
-        callback: doNewChat,
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'newchat',
+        /** @type {(args: { delete: string?}, string) => Promise<''>} */
+        callback: async (args, _) => {
+            await doNewChat({ deleteCurrentChat: isTrueBoolean(args.delete) });
+            return '';
+        },
+        namedArgumentList: [
+            SlashCommandNamedArgument.fromProps({
+                name: 'delete',
+                description: 'delete the current chat',
+                typeList: [ARGUMENT_TYPE.BOOLEAN],
+                defaultValue: 'false',
+                enumList: commonEnumProviders.boolean('trueFalse')(),
+            }),
+        ],
         helpString: 'Start a new chat with the current character',
     }));
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'random',
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'random',
         callback: doRandomChat,
         unnamedArgumentList: [
-            new SlashCommandArgument(
-                'optional tag name', [ARGUMENT_TYPE.STRING], false,
-            ),
+            SlashCommandArgument.fromProps({
+                description: 'optional tag name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                enumProvider: () => tags.filter(tag => Object.values(tag_map).some(x => x.includes(tag.id))).map(tag => new SlashCommandEnumValue(tag.name, null, enumTypes.enum, enumIcons.tag)),
+            }),
         ],
         helpString: 'Start a new chat with a random character. If an argument is provided, only considers characters that have the specified tag.',
     }));
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'delmode',
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'delmode',
         callback: doDelMode,
         aliases: ['del'],
         unnamedArgumentList: [
@@ -3867,13 +4015,18 @@ $(document).ready(() => {
         ],
         helpString: 'Enter message deletion mode, and auto-deletes last N messages if numeric argument is provided.',
     }));
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'cut',
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'cut',
         callback: doMesCut,
         returns: 'the text of cut messages separated by a newline',
         unnamedArgumentList: [
-            new SlashCommandArgument(
-                'number or range', [ARGUMENT_TYPE.NUMBER, ARGUMENT_TYPE.RANGE], true,
-            ),
+            SlashCommandArgument.fromProps({
+                description: 'number or range',
+                typeList: [ARGUMENT_TYPE.NUMBER, ARGUMENT_TYPE.RANGE],
+                isRequired: true,
+                acceptsMultiple: true,
+                enumProvider: commonEnumProviders.messages(),
+            }),
         ],
         helpString: `
             <div>
@@ -3893,30 +4046,40 @@ $(document).ready(() => {
         `,
         aliases: [],
     }));
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'resetpanels',
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'resetpanels',
         callback: doResetPanels,
         helpString: 'resets UI panels to original state',
         aliases: ['resetui'],
     }));
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'bgcol',
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'bgcol',
         callback: setAvgBG,
         helpString: '– WIP test of auto-bg avg coloring',
     }));
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'theme',
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'theme',
         callback: setThemeCallback,
         unnamedArgumentList: [
-            new SlashCommandArgument(
-                'name', [ARGUMENT_TYPE.STRING], true,
-            ),
+            SlashCommandArgument.fromProps({
+                description: 'name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: true,
+                enumProvider: () => themes.map(theme => new SlashCommandEnumValue(theme.name)),
+            }),
         ],
         helpString: 'sets a UI theme by name',
     }));
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'movingui',
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'movingui',
         callback: setmovingUIPreset,
         unnamedArgumentList: [
-            new SlashCommandArgument(
-                'name', [ARGUMENT_TYPE.STRING], true,
-            ),
+            SlashCommandArgument.fromProps({
+                description: 'name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: true,
+                enumProvider: () => movingUIPresets.map(preset => new SlashCommandEnumValue(preset.name)),
+            }),
         ],
         helpString: 'activates a movingUI preset by name',
     }));

@@ -1,4 +1,4 @@
-import { substituteParams } from '../../../script.js';
+import { characters, substituteParams, this_chid } from '../../../script.js';
 import { extension_settings } from '../../extensions.js';
 import { regexFromString } from '../../utils.js';
 export {
@@ -22,6 +22,22 @@ const regex_placement = {
     WORLD_INFO: 5,
 };
 
+function getScopedRegex() {
+    const isAllowed = extension_settings?.character_allowed_regex?.includes(characters?.[this_chid]?.avatar);
+
+    if (!isAllowed) {
+        return [];
+    }
+
+    const scripts = characters[this_chid]?.data?.extensions?.regex_scripts;
+
+    if (!Array.isArray(scripts)) {
+        return [];
+    }
+
+    return scripts;
+}
+
 /**
  * Parent function to fetch a regexed version of a raw string
  * @param {string} rawString The raw string to be regexed
@@ -42,7 +58,8 @@ function getRegexedString(rawString, placement, { characterOverride, isMarkdown,
         return finalString;
     }
 
-    extension_settings.regex.forEach((script) => {
+    const allRegex = [...(extension_settings.regex ?? []), ...(getScopedRegex() ?? [])];
+    allRegex.forEach((script) => {
         if (
             // Script applies to Markdown and input is Markdown
             (script.markdownOnly && isMarkdown) ||
@@ -75,7 +92,7 @@ function getRegexedString(rawString, placement, { characterOverride, isMarkdown,
 
 /**
  * Runs the provided regex script on the given string
- * @param {object} regexScript The regex script to run
+ * @param {import('./index.js').RegexScript} regexScript The regex script to run
  * @param {string} rawString The string to run the regex script on
  * @param {RegexScriptParams} params The parameters to use for the regex script
  * @returns {string} The new string
@@ -95,7 +112,7 @@ function runRegexScript(regexScript, rawString, { characterOverride } = {}) {
     }
 
     // Run replacement. Currently does not support the Overlay strategy
-    newString = rawString.replace(findRegex, function(match) {
+    newString = rawString.replace(findRegex, function (match) {
         const args = [...arguments];
         const replaceString = regexScript.replaceString.replace(/{{match}}/gi, '$0');
         const replaceWithGroups = replaceString.replaceAll(/\$(\d+)/g, (_, num) => {

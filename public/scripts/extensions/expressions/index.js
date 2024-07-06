@@ -1,14 +1,17 @@
-import { callPopup, eventSource, event_types, generateQuietPrompt, getRequestHeaders, saveSettingsDebounced, substituteParams } from '../../../script.js';
+import { callPopup, eventSource, event_types, generateQuietPrompt, getRequestHeaders, online_status, saveSettingsDebounced, substituteParams, substituteParamsExtended, system_message_types } from '../../../script.js';
 import { dragElement, isMobile } from '../../RossAscends-mods.js';
 import { getContext, getApiUrl, modules, extension_settings, ModuleWorkerWrapper, doExtrasFetch, renderExtensionTemplateAsync } from '../../extensions.js';
 import { loadMovingUIState, power_user } from '../../power-user.js';
-import { onlyUnique, debounce, getCharaFilename, trimToEndSentence, trimToStartSentence } from '../../utils.js';
+import { onlyUnique, debounce, getCharaFilename, trimToEndSentence, trimToStartSentence, waitUntilCondition } from '../../utils.js';
 import { hideMutedSprites } from '../../group-chats.js';
 import { isJsonSchemaSupported } from '../../textgen-settings.js';
 import { debounce_timeout } from '../../constants.js';
 import { SlashCommandParser } from '../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../slash-commands/SlashCommand.js';
 import { ARGUMENT_TYPE, SlashCommandArgument } from '../../slash-commands/SlashCommandArgument.js';
+import { isFunctionCallingSupported } from '../../openai.js';
+import { SlashCommandEnumValue, enumTypes } from '../../slash-commands/SlashCommandEnumValue.js';
+import { commonEnumProviders } from '../../slash-commands/SlashCommandCommonEnumsProvider.js';
 export { MODULE_NAME };
 
 const MODULE_NAME = 'expressions';
@@ -16,6 +19,7 @@ const UPDATE_INTERVAL = 2000;
 const STREAMING_UPDATE_INTERVAL = 10000;
 const TALKINGCHECK_UPDATE_INTERVAL = 500;
 const DEFAULT_FALLBACK_EXPRESSION = 'joy';
+const FUNCTION_NAME = 'set_emotion';
 const DEFAULT_LLM_PROMPT = 'Pause your roleplay. Classify the emotion of the last message. Output just one word, e.g. "joy" or "anger". Choose only one of the following labels: {{labels}}';
 const DEFAULT_EXPRESSIONS = [
     'talkinghead',
@@ -85,6 +89,7 @@ function getFallbackExpression() {
  */
 function toggleTalkingHeadCommand(_) {
     setTalkingHeadState(!extension_settings.expressions.talkinghead);
+    return String(extension_settings.expressions.talkinghead);
 }
 
 function isVisualNovelMode() {
@@ -912,6 +917,7 @@ async function setSpriteSetCommand(_, folder) {
     // moduleWorker();
     const vnMode = isVisualNovelMode();
     await sendExpressionCall(folder, lastExpression, true, vnMode);
+    return '';
 }
 
 async function classifyCommand(_, text) {
@@ -933,7 +939,7 @@ async function classifyCommand(_, text) {
 async function setSpriteSlashCommand(_, spriteId) {
     if (!spriteId) {
         console.log('No sprite id provided');
-        return;
+        return '';
     }
 
     spriteId = spriteId.trim().toLowerCase();
@@ -953,7 +959,7 @@ async function setSpriteSlashCommand(_, spriteId) {
 
         if (!spriteItem) {
             console.log('No sprite found for search term ' + spriteId);
-            return;
+            return '';
         }
 
         label = spriteItem.label;
@@ -961,6 +967,7 @@ async function setSpriteSlashCommand(_, spriteId) {
 
     const vnMode = isVisualNovelMode();
     await sendExpressionCall(spriteFolderName, label, true, vnMode);
+    return label;
 }
 
 /**
@@ -1001,9 +1008,12 @@ async function getLlmPrompt(labels) {
         return '';
     }
 
+    if (isFunctionCallingSupported()) {
+        return '';
+    }
+
     const labelsString = labels.map(x => `"${x}"`).join(', ');
-    const prompt = substituteParams(String(extension_settings.expressions.llmPrompt))
-        .replace(/{{labels}}/gi, labelsString);
+    const prompt = substituteParamsExtended(String(extension_settings.expressions.llmPrompt), { labels: labelsString });
     return prompt;
 }
 
@@ -1014,11 +1024,16 @@ async function getLlmPrompt(labels) {
  * @returns {string} The parsed emotion or the fallback expression.
  */
 function parseLlmResponse(emotionResponse, labels) {
-    const fallbackExpression = getFallbackExpression();
-
     try {
         const parsedEmotion = JSON.parse(emotionResponse);
-        return parsedEmotion?.emotion ?? fallbackExpression;
+        const response = parsedEmotion?.emotion?.trim()?.toLowerCase();
+
+        if (!response || !labels.includes(response)) {
+            console.debug(`Parsed emotion response: ${response} not in labels: ${labels}`);
+            throw new Error('Emotion not in labels');
+        }
+
+        return response;
     } catch {
         const fuse = new Fuse(labels, { includeScore: true });
         console.debug('Using fuzzy search in labels:', labels);
@@ -1030,6 +1045,41 @@ function parseLlmResponse(emotionResponse, labels) {
     }
 
     throw new Error('Could not parse emotion response ' + emotionResponse);
+}
+
+/**
+ * Registers the function tool for the LLM API.
+ * @param {FunctionToolRegister} args Function tool register arguments.
+ */
+function onFunctionToolRegister(args) {
+    if (inApiCall && extension_settings.expressions.api === EXPRESSION_API.llm && isFunctionCallingSupported()) {
+        // Only trigger on quiet mode
+        if (args.type !== 'quiet') {
+            return;
+        }
+
+        const emotions = DEFAULT_EXPRESSIONS.filter((e) => e != 'talkinghead');
+        const jsonSchema = {
+            $schema: 'http://json-schema.org/draft-04/schema#',
+            type: 'object',
+            properties: {
+                emotion: {
+                    type: 'string',
+                    enum: emotions,
+                    description: `One of the following: ${JSON.stringify(emotions)}`,
+                },
+            },
+            required: [
+                'emotion',
+            ],
+        };
+        args.registerFunctionTool(
+            FUNCTION_NAME,
+            substituteParams('Sets the label that best describes the current emotional state of {{char}}. Only select one of the enumerated values.'),
+            jsonSchema,
+            true,
+        );
+    }
 }
 
 function onTextGenSettingsReady(args) {
@@ -1087,11 +1137,27 @@ async function getExpressionLabel(text) {
             } break;
             // Using LLM
             case EXPRESSION_API.llm: {
+                try {
+                    await waitUntilCondition(() => online_status !== 'no_connection', 3000, 250);
+                } catch (error) {
+                    console.warn('No LLM connection. Using fallback expression', error);
+                    return getFallbackExpression();
+                }
+
                 const expressionsList = await getExpressionsList();
                 const prompt = await getLlmPrompt(expressionsList);
+                let functionResult = null;
                 eventSource.once(event_types.TEXT_COMPLETION_SETTINGS_READY, onTextGenSettingsReady);
+                eventSource.once(event_types.LLM_FUNCTION_TOOL_REGISTER, onFunctionToolRegister);
+                eventSource.once(event_types.LLM_FUNCTION_TOOL_CALL, (/** @type {FunctionToolCall} */ args) => {
+                    if (args.name !== FUNCTION_NAME) {
+                        return;
+                    }
+
+                    functionResult = args?.arguments;
+                });
                 const emotionResponse = await generateQuietPrompt(prompt, false, false);
-                return parseLlmResponse(emotionResponse, expressionsList);
+                return parseLlmResponse(functionResult || emotionResponse, expressionsList);
             }
             // Extras
             default: {
@@ -1125,7 +1191,7 @@ function getLastCharacterMessage() {
     const reversedChat = context.chat.slice().reverse();
 
     for (let mes of reversedChat) {
-        if (mes.is_user || mes.is_system) {
+        if (mes.is_user || mes.is_system || mes.extra?.type === system_message_types.NARRATOR) {
             continue;
         }
 
@@ -1264,10 +1330,18 @@ async function renderFallbackExpressionPicker() {
     }
 }
 
+function getCachedExpressions() {
+    if (!Array.isArray(expressionsList)) {
+        return [];
+    }
+
+    return [...expressionsList, ...extension_settings.expressions.custom].filter(onlyUnique);
+}
+
 async function getExpressionsList() {
     // Return cached list if available
     if (Array.isArray(expressionsList)) {
-        return [...expressionsList, ...extension_settings.expressions.custom].filter(onlyUnique);
+        return getCachedExpressions();
     }
 
     /**
@@ -1855,7 +1929,7 @@ function migrateSettings() {
     }
     async function addSettings() {
         const template = await renderExtensionTemplateAsync(MODULE_NAME, 'settings');
-        $('#extensions_settings').append(template);
+        $('#expressions_container').append(template);
         $('#expression_override_button').on('click', onClickExpressionOverrideButton);
         $('#expressions_show_default').on('input', onExpressionsShowDefaultInput);
         $('#expression_upload_pack_button').on('click', onClickExpressionUploadPackButton);
@@ -1971,17 +2045,31 @@ function migrateSettings() {
     });
     eventSource.on(event_types.MOVABLE_PANELS_RESET, updateVisualNovelModeDebounced);
     eventSource.on(event_types.GROUP_UPDATED, updateVisualNovelModeDebounced);
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'sprite',
+
+    const localEnumProviders = {
+        expressions: () => getCachedExpressions().map(expression => {
+            const isCustom = extension_settings.expressions.custom?.includes(expression);
+            return new SlashCommandEnumValue(expression, null, isCustom ? enumTypes.name : enumTypes.enum, isCustom ? 'C' : 'D');
+        }),
+    };
+
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'sprite',
         aliases: ['emote'],
         callback: setSpriteSlashCommand,
         unnamedArgumentList: [
-            new SlashCommandArgument(
-                'spriteId', [ARGUMENT_TYPE.STRING], true,
-            ),
+            SlashCommandArgument.fromProps({
+                description: 'spriteId',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: true,
+                enumProvider: localEnumProviders.expressions,
+            }),
         ],
         helpString: 'Force sets the sprite for the current character.',
+        returns: 'label',
     }));
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'spriteoverride',
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'spriteoverride',
         aliases: ['costume'],
         callback: setSpriteSetCommand,
         unnamedArgumentList: [
@@ -1991,22 +2079,29 @@ function migrateSettings() {
         ],
         helpString: 'Sets an override sprite folder for the current character. If the name starts with a slash or a backslash, selects a sub-folder in the character-named folder. Empty value to reset to default.',
     }));
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'lastsprite',
-        callback: (_, value) => lastExpression[value.trim()] ?? '',
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'lastsprite',
+        callback: (_, value) => lastExpression[String(value).trim()] ?? '',
         returns: 'sprite',
         unnamedArgumentList: [
-            new SlashCommandArgument(
-                'charName', [ARGUMENT_TYPE.STRING], true,
-            ),
+            SlashCommandArgument.fromProps({
+                description: 'character name',
+                typeList: [ARGUMENT_TYPE.STRING],
+                isRequired: true,
+                enumProvider: commonEnumProviders.characters('character'),
+            }),
         ],
         helpString: 'Returns the last set sprite / expression for the named character.',
     }));
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'th',
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'th',
         callback: toggleTalkingHeadCommand,
         aliases: ['talkinghead'],
         helpString: 'Character Expressions: toggles <i>Image Type - talkinghead (extras)</i> on/off.',
+        returns: ARGUMENT_TYPE.BOOLEAN,
     }));
-    SlashCommandParser.addCommandObject(SlashCommand.fromProps({ name: 'classify',
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'classify',
         callback: classifyCommand,
         unnamedArgumentList: [
             new SlashCommandArgument(

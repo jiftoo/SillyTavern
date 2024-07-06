@@ -24,7 +24,6 @@ import {
     characters,
     default_avatar,
     addOneMessage,
-    callPopup,
     clearChat,
     Generate,
     select_rm_info,
@@ -40,7 +39,6 @@ import {
     online_status,
     talkativeness_default,
     selectRightMenuWithAnimation,
-    default_ch_mes,
     deleteLastMessage,
     showSwipeButtons,
     hideSwipeButtons,
@@ -63,7 +61,6 @@ import {
     event_types,
     getCurrentChatId,
     setScenarioOverride,
-    getCropPopup,
     system_avatar,
     isChatSaving,
     setExternalAbortController,
@@ -74,9 +71,10 @@ import {
     depth_prompt_role_default,
     shouldAutoContinue,
 } from '../script.js';
-import { printTagList, createTagMapFromList, applyTagsOnCharacterSelect, tag_map } from './tags.js';
+import { printTagList, createTagMapFromList, applyTagsOnCharacterSelect, tag_map, applyTagsOnGroupSelect } from './tags.js';
 import { FILTER_TYPES, FilterHelper } from './filters.js';
 import { isExternalMediaAllowed } from './chats.js';
+import { POPUP_TYPE, Popup, callGenericPopup } from './popup.js';
 
 export {
     selected_group,
@@ -180,10 +178,40 @@ async function loadGroupChat(chatId) {
     return [];
 }
 
+async function validateGroup(group) {
+    if (!group) return;
+
+    // Validate that all members exist as characters
+    let dirty = false;
+    group.members = group.members.filter(member => {
+        const character = characters.find(x => x.avatar === member || x.name === member);
+        if (!character) {
+            const msg = `Warning: Listed member ${member} does not exist as a character. It will be removed from the group.`;
+            toastr.warning(msg, 'Group Validation');
+            console.warn(msg);
+            dirty = true;
+        }
+        return character;
+    });
+
+    if (dirty) {
+        await editGroup(group.id, true, false);
+    }
+}
+
 export async function getGroupChat(groupId, reload = false) {
     const group = groups.find((x) => x.id === groupId);
+    if (!group) {
+        console.warn('Group not found', groupId);
+        return;
+    }
+
+    // Run validation before any loading
+    validateGroup(group);
+
     const chat_id = group.chat_id;
     const data = await loadGroupChat(chat_id);
+    let freshChat = false;
 
     await loadItemizedPrompts(getCurrentChatId());
 
@@ -198,12 +226,17 @@ export async function getGroupChat(groupId, reload = false) {
         if (group && Array.isArray(group.members)) {
             for (let member of group.members) {
                 const character = characters.find(x => x.avatar === member || x.name === member);
-
                 if (!character) {
                     continue;
                 }
 
                 const mes = await getFirstCharacterMessage(character);
+
+                // No first message
+                if (!(mes?.mes)) {
+                    continue;
+                }
+
                 chat.push(mes);
                 await eventSource.emit(event_types.MESSAGE_RECEIVED, (chat.length - 1));
                 addOneMessage(mes);
@@ -211,23 +244,34 @@ export async function getGroupChat(groupId, reload = false) {
             }
         }
         await saveGroupChat(groupId, false);
+        freshChat = true;
     }
 
-    if (group) {
-        let metadata = group.chat_metadata ?? {};
-        updateChatMetadata(metadata, true);
-    }
+    let metadata = group.chat_metadata ?? {};
+    updateChatMetadata(metadata, true);
 
     if (reload) {
         select_group_chats(groupId, true);
     }
 
     await eventSource.emit(event_types.CHAT_CHANGED, getCurrentChatId());
+    if (freshChat) await eventSource.emit(event_types.GROUP_CHAT_CREATED);
+}
+
+/**
+ * Retrieves the members of a group
+ *
+ * @param {string} [groupId=selected_group] - The ID of the group to retrieve members from. Defaults to the currently selected group.
+ * @returns {import('../script.js').Character[]} An array of character objects representing the members of the group. If the group is not found, an empty array is returned.
+ */
+export function getGroupMembers(groupId = selected_group) {
+    const group = groups.find((x) => x.id === groupId);
+    return group?.members.map(member => characters.find(x => x.avatar === member)) ?? [];
 }
 
 /**
  * Finds the character ID for a group member.
- * @param {string} arg 1-based member index or character name
+ * @param {string} arg 0-based member index or character name
  * @returns {number} 0-based character ID
  */
 export function findGroupMemberId(arg) {
@@ -245,8 +289,7 @@ export function findGroupMemberId(arg) {
         return;
     }
 
-    // Index is 1-based
-    const index = parseInt(arg) - 1;
+    const index = parseInt(arg);
     const searchByName = isNaN(index);
 
     if (searchByName) {
@@ -452,7 +495,7 @@ async function getFirstCharacterMessage(character) {
     mes['extra'] = { 'gen_id': Date.now() * Math.random() * 1000000 };
     mes['mes'] = messageText
         ? substituteParams(messageText.trim(), name1, character.name)
-        : default_ch_mes;
+        : '';
     mes['force_avatar'] =
         character.avatar != 'none'
             ? getThumbnailUrl('avatar', character.avatar)
@@ -475,7 +518,13 @@ async function saveGroupChat(groupId, shouldSaveGroup) {
         body: JSON.stringify({ id: chat_id, chat: [...chat] }),
     });
 
-    if (shouldSaveGroup && response.ok) {
+    if (!response.ok) {
+        toastr.error('Check the server connection and reload the page to prevent data loss.', 'Group Chat could not be saved');
+        console.error('Group chat could not be saved', response);
+        return;
+    }
+
+    if (shouldSaveGroup) {
         await editGroup(groupId, false, false);
     }
 }
@@ -529,9 +578,11 @@ export async function renameGroupMember(oldAvatar, newAvatar, newName) {
                             body: JSON.stringify({ id: chatId, chat: [...messages] }),
                         });
 
-                        if (saveChatResponse.ok) {
-                            console.log(`Renamed character ${newName} in group chat: ${chatId}`);
+                        if (!saveChatResponse.ok) {
+                            throw new Error('Group member could not be renamed');
                         }
+
+                        console.log(`Renamed character ${newName} in group chat: ${chatId}`);
                     }
                 }
             }
@@ -1282,14 +1333,20 @@ function isGroupMemberDisabled(avatarId) {
     return Boolean(thisGroup && thisGroup.disabled_members.includes(avatarId));
 }
 
-function onDeleteGroupClick() {
+async function onDeleteGroupClick() {
+    if (!openGroupId) {
+        toastr.warning('Currently no group selected.');
+        return;
+    }
     if (is_group_generating) {
         toastr.warning('Not so fast! Wait for the characters to stop typing before deleting the group.');
         return;
     }
 
-    $('#dialogue_popup').data('group_id', openGroupId);
-    callPopup('<h3>Delete the group?</h3><p>This will also delete all your chats with that group. If you want to delete a single conversation, select a "View past chats" option in the lower left menu.</p>', 'del_group');
+    const confirm = await Popup.show.confirm('Delete the group?', '<p>This will also delete all your chats with that group. If you want to delete a single conversation, select a "View past chats" option in the lower left menu.</p>');
+    if (confirm) {
+        deleteGroup(openGroupId);
+    }
 }
 
 async function onFavoriteGroupClick() {
@@ -1351,7 +1408,7 @@ function select_group_chats(groupId, skipAnimation) {
     }
 
     // render tags
-    printTagList($('#groupTagList'), { forEntityOrKey: groupId, tagOptions: { removable: true } });
+    applyTagsOnGroupSelect(groupId);
 
     // render characters list
     printGroupCandidates();
@@ -1432,13 +1489,13 @@ async function uploadGroupAvatar(event) {
 
     $('#dialogue_popup').addClass('large_dialogue_popup wide_dialogue_popup');
 
-    const croppedImage = await callPopup(getCropPopup(result), 'avatarToCrop');
+    const croppedImage = await callGenericPopup('Set the crop position of the avatar image', POPUP_TYPE.CROP, '', { cropImage: result });
 
     if (!croppedImage) {
         return;
     }
 
-    let thumbnail = await createThumbnail(croppedImage, 200, 300);
+    let thumbnail = await createThumbnail(String(croppedImage), 200, 300);
     //remove data:image/whatever;base64
     thumbnail = thumbnail.replace(/^data:image\/[a-z]+;base64,/, '');
     let _thisGroup = groups.find((x) => x.id == openGroupId);
@@ -1458,8 +1515,7 @@ async function uploadGroupAvatar(event) {
 }
 
 async function restoreGroupAvatar() {
-    const confirm = await callPopup('<h3>Are you sure you want to restore the group avatar?</h3> Your custom image will be deleted, and a collage will be used instead.', 'confirm');
-
+    const confirm = await Popup.show.confirm('Are you sure you want to restore the group avatar?', 'Your custom image will be deleted, and a collage will be used instead.');
     if (!confirm) {
         return;
     }
@@ -1496,15 +1552,17 @@ async function onGroupActionClick(event) {
         const index = _thisGroup.disabled_members.indexOf(member.data('id'));
         if (index !== -1) {
             _thisGroup.disabled_members.splice(index, 1);
+            await editGroup(openGroupId, false, false);
         }
-        await editGroup(openGroupId, false, false);
     }
 
     if (action === 'disable') {
         member.addClass('disabled');
         const _thisGroup = groups.find(x => x.id === openGroupId);
-        _thisGroup.disabled_members.push(member.data('id'));
-        await editGroup(openGroupId, false, false);
+        if (!_thisGroup.disabled_members.includes(member.data('id'))) {
+            _thisGroup.disabled_members.push(member.data('id'));
+            await editGroup(openGroupId, false, false);
+        }
     }
 
     if (action === 'up' || action === 'down') {
@@ -1544,6 +1602,8 @@ export async function openGroupById(groupId) {
     }
 
     if (!is_send_press && !is_group_generating) {
+        select_group_chats(groupId);
+
         if (selected_group !== groupId) {
             await clearChat();
             cancelTtsPlay();
@@ -1555,8 +1615,6 @@ export async function openGroupById(groupId) {
             chat.length = 0;
             await getGroupChat(groupId);
         }
-
-        select_group_chats(groupId);
     }
 }
 
@@ -1804,11 +1862,16 @@ export async function saveGroupBookmarkChat(groupId, name, metadata, mesId) {
 
     await editGroup(groupId, true, false);
 
-    await fetch('/api/chats/group/save', {
+    const response = await fetch('/api/chats/group/save', {
         method: 'POST',
         headers: getRequestHeaders(),
         body: JSON.stringify({ id: name, chat: [...trimmed_chat] }),
     });
+
+    if (!response.ok) {
+        toastr.error('Check the server connection and reload the page to prevent data loss.', 'Group chat could not be saved');
+        console.error('Group chat could not be saved', response);
+    }
 }
 
 function onSendTextareaInput() {
