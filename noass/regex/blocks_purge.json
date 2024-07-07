@@ -1,0 +1,16 @@
+{
+    "scriptName": "Blocks purge",
+    "findRegex": "/(\\n*<blocks thinking>[\\s\\S]*?<\\/blocks thinking>\\n*)|(\\n*<current info>[\\s\\S]*?<\\/current info>\\n*)|(\\n*<reflexion>[\\s\\S]*?<\\/reflexion>\\n*)|(\\n*<summary>[\\s\\S]*?<\\/summary>\\n*)/g",
+    "replaceString": "\n",
+    "trimStrings": [],
+    "placement": [
+        2
+    ],
+    "disabled": false,
+    "markdownOnly": false,
+    "promptOnly": true,
+    "runOnEdit": true,
+    "substituteRegex": false,
+    "minDepth": null,
+    "maxDepth": null
+}

@@ -1,0 +1,14 @@
+{
+    "scriptName": "TEQR",
+    "findRegex": "/(?:[\\s\\S]*?(?=<reflexion>)|$)|(?<=<\\/reflexion>|^)[\\s\\S]*/g",
+    "replaceString": "",
+    "trimStrings": [],
+    "placement": [],
+    "disabled": false,
+    "markdownOnly": false,
+    "promptOnly": false,
+    "runOnEdit": false,
+    "substituteRegex": false,
+    "minDepth": null,
+    "maxDepth": null
+}

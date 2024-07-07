@@ -1,0 +1,16 @@
+{
+    "scriptName": "Add user prefix",
+    "findRegex": "[\\s\\S]*?",
+    "replaceString": "**{{user}}:** {{match}}",
+    "trimStrings": [],
+    "placement": [
+        1
+    ],
+    "disabled": false,
+    "markdownOnly": true,
+    "promptOnly": false,
+    "runOnEdit": true,
+    "substituteRegex": true,
+    "minDepth": null,
+    "maxDepth": null
+}
