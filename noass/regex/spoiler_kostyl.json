@@ -1,0 +1,16 @@
+{
+    "scriptName": "Spoiler kostyl",
+    "findRegex": "/(\\n*<blocks thinking>[\\s\\S]*?<\\/blocks thinking>\\n*)|(\\n*<reflexion>[\\s\\S]*?<\\/reflexion>\\n*)|(\\n*<summary>[\\s\\S]*?<\\/summary>\\n*)/g",
+    "replaceString": "",
+    "trimStrings": [],
+    "placement": [
+        2
+    ],
+    "disabled": false,
+    "markdownOnly": true,
+    "promptOnly": false,
+    "runOnEdit": true,
+    "substituteRegex": false,
+    "minDepth": null,
+    "maxDepth": null
+}

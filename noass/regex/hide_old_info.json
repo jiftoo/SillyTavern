@@ -1,0 +1,16 @@
+{
+    "scriptName": "Hide old info",
+    "findRegex": "<current info>[\\s\\S]*?<\\/current info>",
+    "replaceString": "",
+    "trimStrings": [],
+    "placement": [
+        2
+    ],
+    "disabled": false,
+    "markdownOnly": true,
+    "promptOnly": false,
+    "runOnEdit": true,
+    "substituteRegex": false,
+    "minDepth": 1,
+    "maxDepth": null
+}

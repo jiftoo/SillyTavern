@@ -1,0 +1,14 @@
+{
+    "scriptName": "IEQR",
+    "findRegex": "/(?:[\\s\\S]*?(?=<current info>)|$)|(?<=<\\/current info>|^)[\\s\\S]*/g",
+    "replaceString": "",
+    "trimStrings": [],
+    "placement": [],
+    "disabled": false,
+    "markdownOnly": false,
+    "promptOnly": false,
+    "runOnEdit": false,
+    "substituteRegex": false,
+    "minDepth": null,
+    "maxDepth": null
+}

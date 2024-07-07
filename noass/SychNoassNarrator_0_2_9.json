@@ -1,0 +1,452 @@
+{
+    "chat_completion_source": "claude",
+    "openai_model": "gpt-3.5-turbo",
+    "claude_model": "claude-3-sonnet-20240229",
+    "windowai_model": "",
+    "openrouter_model": "OR_Website",
+    "openrouter_use_fallback": true,
+    "openrouter_force_instruct": false,
+    "openrouter_group_models": false,
+    "openrouter_sort_models": "alphabetically",
+    "ai21_model": "j2-ultra",
+    "mistralai_model": "mistral-medium",
+    "cohere_model": "command-r",
+    "perplexity_model": "llama-3-70b-instruct",
+    "custom_model": "",
+    "custom_url": "",
+    "custom_include_body": "",
+    "custom_exclude_body": "",
+    "custom_include_headers": "",
+    "custom_prompt_post_processing": "",
+    "google_model": "gemini-pro",
+    "temperature": 0.67,
+    "frequency_penalty": 0.3,
+    "presence_penalty": 0.3,
+    "count_penalty": 0,
+    "top_p": 0.94,
+    "top_k": 125,
+    "top_a": 1,
+    "min_p": 0,
+    "repetition_penalty": 1,
+    "openai_max_context": 50000,
+    "openai_max_tokens": 2048,
+    "wrap_in_quotes": false,
+    "names_behavior": 0,
+    "send_if_empty": "",
+    "jailbreak_system": false,
+    "impersonation_prompt": "(NOTE: After a newline, I will write {{user}}'s response without a prefix, and then immediately repeat it with a prefix)",
+    "new_chat_prompt": "",
+    "new_group_chat_prompt": "",
+    "new_example_chat_prompt": "",
+    "continue_nudge_prompt": "",
+    "bias_preset_selected": "Default (none)",
+    "max_context_unlocked": true,
+    "wi_format": "<world>\n{0}\n</world>\n",
+    "scenario_format": "",
+    "personality_format": "",
+    "group_nudge_prompt": "",
+    "stream_openai": true,
+    "websearch_cohere": false,
+    "prompts": [
+        {
+            "name": "",
+            "system_prompt": true,
+            "role": "system",
+            "content": "",
+            "identifier": "main",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "forbid_overrides": false
+        },
+        {
+            "name": "🟡 Command PF",
+            "system_prompt": true,
+            "role": "assistant",
+            "content": "[NOTE: I will ...]",
+            "identifier": "nsfw",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "forbid_overrides": false
+        },
+        {
+            "name": "",
+            "system_prompt": true,
+            "role": "system",
+            "content": "",
+            "identifier": "jailbreak",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "chatHistory",
+            "name": "Chat History",
+            "system_prompt": true,
+            "marker": true
+        },
+        {
+            "identifier": "worldInfoAfter",
+            "name": "World Info (after)",
+            "system_prompt": true,
+            "marker": true
+        },
+        {
+            "identifier": "worldInfoBefore",
+            "name": "World Info (before)",
+            "system_prompt": true,
+            "marker": true
+        },
+        {
+            "identifier": "enhanceDefinitions",
+            "role": "system",
+            "name": "⚪ Style Prompt",
+            "content": "Assistant is \"Yukio Mishima\".\n<Yukio Mishima>\nFavored highly stylized, poetic language and dialogue that blended classical Japanese literary traditions with modern Western influences. His plays made extensive use of symbolism, metaphor, and aestheticized depictions of violence and sexuality. Mishima's narrative voice was uncompromising and defiant, exploring transgressive themes of death, beauty, and the darker aspects of human nature.\n\nHis plots were psychologically probing, delving into the motivations and internal conflicts of his characters, often antiheroes or societal outcasts. Mishima blurred boundaries between reality and ritual, frequently incorporating elements of Noh theater, Japanese myths, and Buddhist philosophy. His plays featured non-linear structures, jarring tonal shifts, and an undercurrent of existential questioning.\n\nMishima's stylized dialogue could be darkly humorous one moment and shockingly visceral the next. His goal was to unmask and lay bare the most fundamental truths about human existence, no matter how disturbing or taboo. His distinctive avant-garde aesthetic challenged audiences' sensibilities and societal norms.\n</Yukio Mishima>",
+            "system_prompt": true,
+            "marker": false,
+            "injection_position": 0,
+            "injection_depth": 4,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "charDescription",
+            "name": "Char Description",
+            "system_prompt": true,
+            "marker": true
+        },
+        {
+            "identifier": "charPersonality",
+            "name": "Char Personality",
+            "system_prompt": true,
+            "marker": true
+        },
+        {
+            "identifier": "scenario",
+            "name": "Scenario",
+            "system_prompt": true,
+            "marker": true
+        },
+        {
+            "identifier": "personaDescription",
+            "name": "Persona Description",
+            "system_prompt": true,
+            "marker": true
+        },
+        {
+            "identifier": "6ee98bc5-3cac-4244-a75c-4aa06aed6f6c",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🟢 Constraints",
+            "role": "assistant",
+            "content": "<constraints>\nWriting Style:\n- The style should closely match `<Yukio Mishima>`\n- The formatting must be consistent with `<formatting>`\n\nWorld:\n- The world is a dynamic and evolving environment that reacts to characters' actions and decisions.\n- The world supports a day-night cycle and time progression, affecting character activities and interactions\n- The world evolves over time, with changing weather, seasons, and events that impact narrative\n- Integrating new elaborated items, facts, lore and recent events\n\nCharacters:\n- Creative autonomous characters with unique perspectives, motivations, and desires\n- Frequent interaction between characters and with their environment to showcase personalities\n- Characters express a wide range of emotions and experiences through dialogue and actions\n- Consistently emphasize each character's key traits through their actions, speech, and inner thoughts\n- Characters remember past interactions and experiences, affecting future behavior and relationships\n\nNarration:\n- While {{user}} can state intended actions, the Narrator maintains narrative control. Narrator can introduce appropriate challenges, obstacles or complications to {{user}}'s endeavors, preventing outright or easy success.\n- Narrative should not contain any new blocks.",
+            "injection_position": 1,
+            "injection_depth": 7,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "dialogueExamples",
+            "name": "Chat Examples",
+            "system_prompt": true,
+            "marker": true
+        },
+        {
+            "identifier": "364260f6-550b-47db-88d3-3b262a20ec76",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🟢 </constraints>",
+            "role": "assistant",
+            "content": "Top priorities: in-character, characters' interactions, complex characters, alive world, writing style.\n</constraints>",
+            "injection_position": 1,
+            "injection_depth": 7,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "b8ffafb8-9ad9-47f5-9d70-14a271ca152f",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🔵 Description",
+            "role": "assistant",
+            "content": "<{{char}}>\n{{description}}\n</{{char}}>",
+            "injection_position": 1,
+            "injection_depth": 7,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "4a4f032c-b1f9-4a0d-8b2a-12b77acfaf99",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🟢 Custom",
+            "role": "assistant",
+            "content": "Other:\n- All the characters speak authentic Russian, using Russian slang, typical word constructions, proverbs, etc. All the actions and narrative must also be written in Russian.",
+            "injection_position": 1,
+            "injection_depth": 7,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "4681d829-af21-4811-90a2-22e28bce0661",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "⚪ Formatting",
+            "role": "system",
+            "content": "<formatting>\n<general>\n- Actions: *actions*\n- Speech: \"speech\"\n- Thoughts: 'thoughts'\n- Actions, speech or thoughts of {{user}} must always be preceded by {{user}}: prefix.\n</general>\n\n<details>\n- Consistent labeling of new interactive objects or points of interest to distinguish them from background elements.\n- Limit re-descriptions of common elements unless they are relevant to the current context or have changed in some way.",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "40128feb-b453-496e-be69-1e4c7b0553ce",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "⚪ </formatting>",
+            "role": "system",
+            "content": "</details>\n</formatting>",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "394295e5-5514-436e-873e-c2fce80abb9c",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "⚪ Custom",
+            "role": "system",
+            "content": "- Anime-like dialogue with Japanese honorifics (-kun, -chan), exclamations (\"Ehh?!\", \"Masaka!\"), and interjections (\"Ano...\")\n- Emphasis through word elongation, CAPS, formatting, onomatopoeia (ex: \"Aaaaah!\", \"WHAT?!\", *sighs*) sparsely",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "03455d84-3937-4473-a773-f7f816870d23",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🔵 Plans",
+            "role": "assistant",
+            "content": "<story plans>\n{{scenario}}\n<story plans>",
+            "injection_position": 1,
+            "injection_depth": 7,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "e2531bbd-bd0b-4f62-8e7f-d40131bd5dff",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🔵 Tags",
+            "role": "assistant",
+            "content": "<tags>\n{{personality}}\n<tags>",
+            "injection_position": 1,
+            "injection_depth": 7,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "2ba76b1b-027a-4c1d-889e-f81eea4cf2d9",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🟡 Word Limit PF",
+            "role": "assistant",
+            "content": "[NOTE: I will write no more than 200 words]",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "84cf675d-313e-473c-8723-10ae007c7f41",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🟡 Anti-User PF",
+            "role": "assistant",
+            "content": "[NOTE: I will avoid writing for {{user}} this time and I will write for other characters instead.]",
+            "injection_position": 0,
+            "injection_depth": 4,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "4c029500-31cf-48fb-abe5-c9bb4717e15c",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🔵 Persona",
+            "role": "assistant",
+            "content": "<{{user}}>\n{{persona}}\n</{{user}}>",
+            "injection_position": 1,
+            "injection_depth": 7,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "d3341039-48c6-48c5-a615-06ad376559b3",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🔵 Card Prompt",
+            "role": "assistant",
+            "content": "<features>\n{{charPrompt}}\n</features>",
+            "injection_position": 1,
+            "injection_depth": 7,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "6daade17-6201-4a16-ac6a-83383543cfa6",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🟣 Card JB",
+            "role": "assistant",
+            "content": "{{charJailbreak}}",
+            "injection_position": 1,
+            "injection_depth": 1,
+            "forbid_overrides": false
+        },
+        {
+            "identifier": "41d861b5-f9af-4c13-9ee6-832717dd8d19",
+            "system_prompt": false,
+            "enabled": false,
+            "marker": false,
+            "name": "🟣 Custom JB",
+            "role": "assistant",
+            "content": "[NOTE: ...]",
+            "injection_position": 1,
+            "injection_depth": 1,
+            "forbid_overrides": false
+        }
+    ],
+    "prompt_order": [
+        {
+            "character_id": 100001,
+            "order": [
+                {
+                    "identifier": "enhanceDefinitions",
+                    "enabled": true
+                },
+                {
+                    "identifier": "4681d829-af21-4811-90a2-22e28bce0661",
+                    "enabled": true
+                },
+                {
+                    "identifier": "394295e5-5514-436e-873e-c2fce80abb9c",
+                    "enabled": true
+                },
+                {
+                    "identifier": "40128feb-b453-496e-be69-1e4c7b0553ce",
+                    "enabled": true
+                },
+                {
+                    "identifier": "worldInfoBefore",
+                    "enabled": true
+                },
+                {
+                    "identifier": "worldInfoAfter",
+                    "enabled": true
+                },
+                {
+                    "identifier": "dialogueExamples",
+                    "enabled": true
+                },
+                {
+                    "identifier": "charDescription",
+                    "enabled": false
+                },
+                {
+                    "identifier": "charPersonality",
+                    "enabled": false
+                },
+                {
+                    "identifier": "personaDescription",
+                    "enabled": false
+                },
+                {
+                    "identifier": "scenario",
+                    "enabled": false
+                },
+                {
+                    "identifier": "chatHistory",
+                    "enabled": true
+                },
+                {
+                    "identifier": "main",
+                    "enabled": false
+                },
+                {
+                    "identifier": "6ee98bc5-3cac-4244-a75c-4aa06aed6f6c",
+                    "enabled": true
+                },
+                {
+                    "identifier": "4a4f032c-b1f9-4a0d-8b2a-12b77acfaf99",
+                    "enabled": false
+                },
+                {
+                    "identifier": "364260f6-550b-47db-88d3-3b262a20ec76",
+                    "enabled": true
+                },
+                {
+                    "identifier": "4c029500-31cf-48fb-abe5-c9bb4717e15c",
+                    "enabled": true
+                },
+                {
+                    "identifier": "b8ffafb8-9ad9-47f5-9d70-14a271ca152f",
+                    "enabled": true
+                },
+                {
+                    "identifier": "e2531bbd-bd0b-4f62-8e7f-d40131bd5dff",
+                    "enabled": false
+                },
+                {
+                    "identifier": "03455d84-3937-4473-a773-f7f816870d23",
+                    "enabled": false
+                },
+                {
+                    "identifier": "d3341039-48c6-48c5-a615-06ad376559b3",
+                    "enabled": false
+                },
+                {
+                    "identifier": "jailbreak",
+                    "enabled": false
+                },
+                {
+                    "identifier": "6daade17-6201-4a16-ac6a-83383543cfa6",
+                    "enabled": false
+                },
+                {
+                    "identifier": "41d861b5-f9af-4c13-9ee6-832717dd8d19",
+                    "enabled": false
+                },
+                {
+                    "identifier": "84cf675d-313e-473c-8723-10ae007c7f41",
+                    "enabled": false
+                },
+                {
+                    "identifier": "2ba76b1b-027a-4c1d-889e-f81eea4cf2d9",
+                    "enabled": false
+                },
+                {
+                    "identifier": "nsfw",
+                    "enabled": false
+                }
+            ]
+        }
+    ],
+    "api_url_scale": "",
+    "show_external_models": true,
+    "assistant_prefill": "",
+    "human_sysprompt_message": "Continue writing the interactive story with {{user}} as the protagonist/player. I will not get in the way. *vanishes forever*",
+    "use_ai21_tokenizer": false,
+    "use_google_tokenizer": false,
+    "claude_use_sysprompt": true,
+    "use_makersuite_sysprompt": true,
+    "use_alt_scale": false,
+    "squash_system_messages": true,
+    "image_inlining": false,
+    "bypass_status_check": true,
+    "continue_prefill": false,
+    "continue_postfix": "\n\n",
+    "seed": -1,
+    "n": 1
+}

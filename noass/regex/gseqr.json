@@ -1,0 +1,14 @@
+{
+    "scriptName": "GSEQR",
+    "findRegex": "/(?:[\\s\\S]*?(?=<summary>)|$)|(?<=<\\/summary>|^)[\\s\\S]*/g",
+    "replaceString": "",
+    "trimStrings": [],
+    "placement": [],
+    "disabled": false,
+    "markdownOnly": false,
+    "promptOnly": false,
+    "runOnEdit": false,
+    "substituteRegex": false,
+    "minDepth": null,
+    "maxDepth": null
+}
